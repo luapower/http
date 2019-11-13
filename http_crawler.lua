@@ -1,7 +1,6 @@
 
---fast async http(s) downloader.
+--async http(s) downloader.
 --Written by Cosmin Apreutesei. Public Domain.
---Supports caching, cookie jar, multiple source ips, retries and redirects.
 
 local zlib = require'zlib'
 local loop = require'socketloop'
@@ -10,27 +9,29 @@ local http = require'http_request'
 local http_cookie = require'http_cookie'
 local http_date = require'http_date'
 local ltn12 = require'ltn12'
-local tuple2 = require'glue'.tuples(2)
+local glue = require'glue'
+local tuple2 = glue.tuples(2)
 local fs = require'fs'
 local path = require'path'
 
-local crawler = {}
+local crawler = {
+	socket_timeout = 5,
+	source_ips = {},
+	print_urls = false,
+	print_redirects = false,
+	cache_pages = false,
+	read_cache_pages = false,
+	maxretries = 0,
+	user_agent = 'Mozilla/5.0 (Windows NT 5.1)',
+}
 
-function crawler.new(opt)
+function crawler:new(opt)
 
-	local opt = opt or {}
-	local cache_dir = opt.cache_dir or glue.bin..'/tmp'
-	local socket_timeout = opt.socket_timeout or 5
-	local source_ips = opt.source_ips or {}
-	local print_urls = opt.print_urls
-	local print_redirects = opt.print_redirects
-	local cache_pages = opt.cache_pages
-	local read_cache_pages = opt.read_cache_pages
-	local maxretries = opt.max_retries or 0
+	local self = glue.update({
+		cache_dir = fs.exedir()..'/tmp',
+	}, self, opt)
 
-	http.USERAGENT = opt.user_agent or 'Mozilla/5.0 (Windows NT 5.1)'
-
-	local crawler = {}
+	http.USERAGENT = self.user_agent
 
 	--source ip allocation ----------------------------------------------------
 
@@ -40,9 +41,9 @@ function crawler.new(opt)
 
 	local function get_source_ip(host)
 		local i = (last_source_ip[host] or 0) + 1
-		if i > #source_ips then i = 1 end
+		if i > #self.source_ips then i = 1 end
 		last_source_ip[host] = i
-		return source_ips[i]
+		return self.source_ips[i]
 	end
 
 	--persistent connections --------------------------------------------------
@@ -296,7 +297,7 @@ function crawler.new(opt)
 		local ok, code, headers = http.request(opt)
 
 		if not ok then
-			if retries < maxretries then
+			if retries < self.maxretries then
 				return download_page(req, retries + 1)
 			end
 			return nil, code
@@ -331,13 +332,13 @@ function crawler.new(opt)
 		end
 		local crc = string.format('%x', zlib.crc32(filename))
 		local subdir = crc:sub(-4):gsub('(.)', '%1') --last 4 digits of crc
-		local dir = path.combine(cache_dir, subdir)
+		local dir = path.combine(self.cache_dir, subdir)
 		assert(fs.mkdir(dir, true))
 		return path.combine(dir, filename), subdir
 	end
 
 	local function should_cache(url)
-		if not cache_pages then return end
+		if not self.cache_pages then return end
 		local ext = url_fileext(url) or 'html'
 		if ext ~= 'html' then return end --we only cache htmls
 		return true
@@ -348,9 +349,9 @@ function crawler.new(opt)
 		local url = req.url
 		local should_cache = should_cache(url)
 		local file, subdir = req_filename(req)
-		local body = read_cache_pages and glue.readfile(file)
+		local body = self.read_cache_pages and glue.readfile(file)
 		if body then
-			if print_urls then
+			if self.print_urls then
 				print('[C] '..subdir..' '..url)
 			end
 			return body, 200
@@ -361,14 +362,14 @@ function crawler.new(opt)
 				lognet(url, '\n\t', pp.format(code))
 				return body, code, headers
 			end
-			if code ~= 200 and print_redirects then
+			if code ~= 200 and self.print_redirects then
 				lognet(url, '\n\thttp ', code)
 			end
 			if code == 200 and should_cache then
 				glue.writefile(file, body)
 			end
 			local time = socket.gettime() - start_time
-			if print_urls then
+			if self.print_urls then
 				print(string.format('[D] %s (%d) %s %.1fs',
 					url, code, kbytes(body) or '',  time))
 			end
@@ -379,7 +380,7 @@ function crawler.new(opt)
 	--getpage with bells:
 	-- * makes an async request if a completion callback is given.
 	-- * starts the loop if called from the main thread.
-	function crawler:getpage(req, on_complete, on_error)
+	function self:getpage(req, on_complete, on_error)
 		if type(req) == 'string' then
 			req = {url = req}
 		end
@@ -397,7 +398,7 @@ function crawler.new(opt)
 			loop.newthread(function()
 				body, code, headers = getpage(req)
 			end)
-			loop.start(socket_timeout)
+			loop.start(self.socket_timeout)
 			close_connections()
 			return body, code, headers
 		else --normal thread: make a synchronous request
@@ -405,7 +406,7 @@ function crawler.new(opt)
 		end
 	end
 
-	return crawler
+	return self
 end
 
 --test download speed --------------------------------------------------------
@@ -428,7 +429,7 @@ end
 
 local function speed_test()
 
-	local crawler = crawler.new{
+	local crawler = crawler:new{
 		--
 	}
 
@@ -460,7 +461,7 @@ local function speed_test()
 		end)
 	end
 
-	loop.start(socket_timeout)
+	loop.start(5)
 	close_connections()
 
 	local t1 = socket.gettime()
