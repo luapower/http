@@ -11,29 +11,31 @@ local headers = require'http_headers'
 local request = {}
 
 request.timeout = 60 -- connection timeout in seconds
-request.port    = 80 -- default port for document retrieval
+request.port    = 80
 request.user_agent = 'http_request.lua' -- user agent field sent in request
 
 -- Reads MIME headers from a connection, unfolding where needed
-local function receiveheaders(sock, headers)
-	local line, name, value, err
+function request:receive_headers(headers)
+	local _, line, name, value, err
 	headers = headers or {}
 	-- get first line
-	line, err = sock:receive()
+	line, err = self:getline()
 	if err then return nil, err end
 	-- headers go until a blank line is found
 	while line ~= '' do
 		-- get field-name and value
-		name, value = socket.skip(2, string.find(line, '^(.-):%s*(.*)'))
-		if not (name and value) then return nil, 'malformed reponse headers' end
+		name, value = string.match(line, '^(.-):%s*(.*)')
+		if not (name and value) then
+			return nil, 'malformed reponse headers'
+		end
 		name = string.lower(name)
 		-- get next line (value might be folded)
-		line, err = sock:receive()
+		line, err = self:getline()
 		if err then return nil, err end
 		-- unfold any folded values
 		while string.find(line, '^%s') do
 			value = value .. line
-			line, err = sock:receive()
+			line, err = self:getline()
 			if err then return nil, err end
 		end
 		-- save pair in table
@@ -47,43 +49,35 @@ local function receiveheaders(sock, headers)
 end
 
 -- Extra sources and sinks
-socket.sourcet['http-chunked'] = function(sock, headers)
-	return base.setmetatable({
-		getfd = function() return sock:getfd() end,
-		dirty = function() return sock:dirty() end
-	}, {
-		__call = function()
-			-- get chunk size, skip extention
-			local line, err = sock:receive()
-			if err then return nil, err end
-			local size = base.tonumber(string.gsub(line, ';.*', ''), 16)
-			if not size then return nil, 'invalid chunk size' end
-			-- was it the last chunk?
-			if size > 0 then
-				-- if not, get chunk and skip terminating CRLF
-				local chunk, err = sock:receive(size)
-				if chunk then sock:receive() end
-				return chunk, err
-			else
-				-- if it was, read trailers into headers table
-				headers, err = receiveheaders(sock, headers)
-				if not headers then return nil, err end
-			end
+local function source_chunked(sock, headers)
+	return function()
+		-- get chunk size, skip extention
+		local line, err = sock:receive()
+		if err then return nil, err end
+		local size = tonumber(string.gsub(line, ';.*', ''), 16)
+		if not size then return nil, 'invalid chunk size' end
+		-- was it the last chunk?
+		if size > 0 then
+			-- if not, get chunk and skip terminating CRLF
+			local chunk, err = sock:receive(size)
+			if chunk then sock:receive() end
+			return chunk, err
+		else
+			-- if it was, read trailers into headers table
+			headers, err = receiveheaders(sock, headers)
+			if not headers then return nil, err end
 		end
-	})
+	end
 end
 
-socket.sinkt['http-chunked'] = function(sock)
-	return base.setmetatable({
-		getfd = function() return sock:getfd() end,
-		dirty = function() return sock:dirty() end
-	}, {
-		__call = function(self, chunk, err)
-			if not chunk then return sock:send('0\r\n\r\n') end
-			local size = string.format('%X\r\n', string.len(chunk))
-			return sock:send(size ..  chunk .. '\r\n')
+local function sink_chunked(sock)
+	return function(self, chunk, err)
+		if not chunk then
+			return sock:send('0\r\n\r\n')
 		end
-	})
+		local size = string.format('%X\r\n', string.len(chunk))
+		return sock:send(size ..  chunk .. '\r\n')
+	end
 end
 
 -- Low level HTTP API --------------------------------------------------------
@@ -93,7 +87,7 @@ local metat = { __index = {} }
 function _M.open(host, port, create)
 	-- create socket with user connect function, or with default
 	local c = socket.try((create or socket.tcp)())
-	local h = base.setmetatable({ c = c }, metat)
+	local h = setmetatable({ c = c }, metat)
 	-- create finalized try
 	h.try = socket.newtry(function() h:close(true) end)
 	-- set timeout before connecting
@@ -111,7 +105,7 @@ end
 function metat.__index:sendheaders(tosend)
 	local canonic = headers.canonic
 	local h = '\r\n'
-	for f, v in base.pairs(tosend) do
+	for f, v in pairs(tosend) do
 		h = (canonic[f] or f) .. ': ' .. v .. '\r\n' .. h
 	end
 	self.try(self.c:send(h))
@@ -134,8 +128,8 @@ function metat.__index:receivestatusline()
 	if status ~= 'HTTP/' then return nil, status end
 	-- otherwise proceed reading a status line
 	status = self.try(self.c:receive('*l', status))
-	local code = socket.skip(2, string.find(status, 'HTTP/%d*%.%d* (%d%d%d)'))
-	return self.try(base.tonumber(code), status)
+	local code = string.match(status, 'HTTP/%d*%.%d* (%d%d%d)'))
+	return self.try(tonumber(code), status)
 end
 
 function metat.__index:receiveheaders()
@@ -145,11 +139,14 @@ end
 function metat.__index:receivebody(headers, sink, step)
 	sink = sink or ltn12.sink.null()
 	step = step or ltn12.pump.step
-	local length = base.tonumber(headers['content-length'])
+	local length = tonumber(headers['content-length'])
 	local t = headers['transfer-encoding'] -- shortcut
 	local mode = 'default' -- connection close
-	if t and t ~= 'identity' then mode = 'http-chunked'
-	elseif base.tonumber(headers['content-length']) then mode = 'by-length' end
+	if t and t ~= 'identity' then
+		mode = 'http-chunked'
+	elseif tonumber(headers['content-length']) then
+		mode = 'by-length'
+	end
 	return self.try(ltn12.pump.all(socket.source(mode, self.c, length),
 		sink, step))
 end
@@ -164,9 +161,8 @@ function metat.__index:close()
 	return self.c:close()
 end
 
------------------------------------------------------------------------------
--- High level HTTP API
------------------------------------------------------------------------------
+-- High level HTTP API -------------------------------------------------------
+
 local function adjusturi(reqt)
 	local u = reqt
 	-- if there is a proxy, we need the full url. otherwise, just a part.
@@ -207,7 +203,7 @@ local function adjustheaders(reqt)
 			'Basic ' ..  (mime.b64(reqt.user .. ':' .. reqt.password))
 	end
 	-- override with user headers
-	for i,v in base.pairs(reqt.headers or lower) do
+	for i,v in pairs(reqt.headers or lower) do
 		lower[string.lower(i)] = v
 	end
 	return lower
@@ -225,10 +221,10 @@ local function adjustrequest(reqt)
 	-- parse url if provided
 	local nreqt = reqt.url and url.parse(reqt.url, default) or {}
 	-- explicit components override url
-	for i,v in base.pairs(reqt) do nreqt[i] = v end
+	for i,v in pairs(reqt) do nreqt[i] = v end
 	if nreqt.port == '' then nreqt.port = 80 end
 	socket.try(nreqt.host and nreqt.host ~= '',
-		'invalid host "' .. base.tostring(nreqt.host) .. '"')
+		'invalid host "' .. tostring(nreqt.host) .. '"')
 	-- compute uri if user hasn't overriden
 	nreqt.uri = reqt.uri or adjusturi(nreqt)
 	-- ajust host and port if there is a proxy
@@ -328,7 +324,7 @@ local function srequest(u, b)
 		}
 		reqt.method = 'POST'
 	end
-	local code, headers, status = socket.skip(1, trequest(reqt))
+	local _, code, headers, status = trequest(reqt)
 	return table.concat(t), code, headers, status
 end
 
@@ -336,18 +332,11 @@ local function pack(ok, ...)
 	return ok, {n = select('#', ...), ...}
 end
 
---reimplement socket.protect in Lua so we can yield across C-stack boundaries.
-function socket.protect(f)
-	return function(...)
-		local ok, ret = pack(pcall(f, ...))
-		if ok then return unpack(ret, 1, ret.n)
-		else return nil, ret[1] end
+function request:new(opt, body)
+	if type(opt) == 'string' then
+		return self:new{url = opt, body = body}
 	end
-end
-
-_M.request = socket.protect(function(reqt, body)
-	if base.type(reqt) == 'string' then return srequest(reqt, body)
-	else return trequest(reqt) end
+	return
 end)
 
 return request
