@@ -1,167 +1,96 @@
 
--- HTTP/1.1 client in Lua.
--- Author: Diego Nehab. MIT License. Modified By Cosmin Apreutesei.
+-- HTTP/1.1 client protocol in Lua.
+-- Written by Cosmin Apreutesei. Public Domain.
 
-local socket = require'socket'
 local url = require'url'
-local ltn12 = require'ltn12'
-local mime = require'mime'
+local b64 = require'libb64'
 local headers = require'http_headers'
 
 local request = {}
 
-request.timeout = 60 -- connection timeout in seconds
-request.port    = 80
 request.user_agent = 'http_request.lua' -- user agent field sent in request
 
--- Reads MIME headers from a connection, unfolding where needed
-function request:receive_headers(headers)
-	local _, line, name, value, err
-	headers = headers or {}
-	-- get first line
-	line, err = self:getline()
-	if err then return nil, err end
-	-- headers go until a blank line is found
-	while line ~= '' do
-		-- get field-name and value
-		name, value = string.match(line, '^(.-):%s*(.*)')
-		if not (name and value) then
-			return nil, 'malformed reponse headers'
-		end
+function request:read_headers()
+	local line, name, value
+	self.response_headers = self.response_headers or {}
+	local headers = self.response_headers
+	line = self:read_line()
+	while line ~= '' do --headers end up with a blank line
+		name, value = assert(string.match(line, '^(.-):%s*(.*)', 'invalid header')
 		name = string.lower(name)
-		-- get next line (value might be folded)
-		line, err = self:getline()
-		if err then return nil, err end
-		-- unfold any folded values
-		while string.find(line, '^%s') do
+		line = self:read_line()
+		while string.find(line, '^%s') do --unfold any folded values
 			value = value .. line
-			line, err = self:getline()
-			if err then return nil, err end
+			line = self:read_line()
 		end
-		-- save pair in table
 		if headers[name] then
 			headers[name] = headers[name] .. ', ' .. value
 		else
 			headers[name] = value
 		end
 	end
-	return headers
 end
 
--- Extra sources and sinks
-local function source_chunked(sock, headers)
-	return function()
-		-- get chunk size, skip extention
-		local line, err = sock:receive()
-		if err then return nil, err end
-		local size = tonumber(string.gsub(line, ';.*', ''), 16)
-		if not size then return nil, 'invalid chunk size' end
-		-- was it the last chunk?
-		if size > 0 then
-			-- if not, get chunk and skip terminating CRLF
-			local chunk, err = sock:receive(size)
-			if chunk then sock:receive() end
-			return chunk, err
-		else
-			-- if it was, read trailers into headers table
-			headers, err = receiveheaders(sock, headers)
-			if not headers then return nil, err end
+function request:read_chunks()
+	while true do
+		local line = self:read_line()
+		local size = tonumber(string.gsub(line, ';.*', ''), 16) --size[; extension]
+		assert(size, 'invalid chunk size')
+		if size > 0 then --get chunk and skip terminating CRLF
+			self:read_content(size)
+			self:read_line()
+		else --last chunk, read trailers
+			self:read_headers()
+			return
 		end
 	end
 end
 
-local function sink_chunked(sock)
-	return function(self, chunk, err)
-		if not chunk then
-			return sock:send('0\r\n\r\n')
-		end
+function request:write_chunk(chunk)
+	if not chunk then
+		sock:write'0\r\n\r\n'
+	else
 		local size = string.format('%X\r\n', string.len(chunk))
-		return sock:send(size ..  chunk .. '\r\n')
+		self:write(size ..  chunk .. '\r\n')
 	end
 end
 
--- Low level HTTP API --------------------------------------------------------
-
-local metat = { __index = {} }
-
-function _M.open(host, port, create)
-	-- create socket with user connect function, or with default
-	local c = socket.try((create or socket.tcp)())
-	local h = setmetatable({ c = c }, metat)
-	-- create finalized try
-	h.try = socket.newtry(function() h:close(true) end)
-	-- set timeout before connecting
-	h.try(c:settimeout(_M.TIMEOUT))
-	h.try(c:connect(host, port or _M.PORT))
-	-- here everything worked
-	return h
+function request:write_request_line(method, uri)
+	local method = method and method:upper() or 'GET'
+	local reqline = string.format('%s %s HTTP/1.1\r\n', method, uri)
+	self:write(reqline)
 end
 
-function metat.__index:sendrequestline(method, uri)
-	local reqline = string.format('%s %s HTTP/1.1\r\n', method or 'GET', uri)
-	return self.try(self.c:send(reqline))
-end
-
-function metat.__index:sendheaders(tosend)
-	local canonic = headers.canonic
-	local h = '\r\n'
-	for f, v in pairs(tosend) do
-		h = (canonic[f] or f) .. ': ' .. v .. '\r\n' .. h
+function request:write_headers()
+	for k, v in pairs(self.request_headers) do
+		self:write(k .. ': ' .. v .. '\r\n')
 	end
-	self.try(self.c:send(h))
-	return 1
+	self:write'\r\n'
 end
 
-function metat.__index:sendbody(headers, source, step)
-	source = source or ltn12.source.empty()
-	step = step or ltn12.pump.step
-	-- if we don't know the size in advance, send chunked and hope for the best
+function request:write_body()
 	local mode = 'http-chunked'
-	if headers['content-length'] then mode = 'keep-open' end
-	return self.try(ltn12.pump.all(source, socket.sink(mode, self.c), step))
-end
-
-function metat.__index:receivestatusline()
-	local status = self.try(self.c:receive(5))
-	-- identify HTTP/0.9 responses, which do not contain a status line
-	-- this is just a heuristic, but is what the RFC recommends
-	if status ~= 'HTTP/' then return nil, status end
-	-- otherwise proceed reading a status line
-	status = self.try(self.c:receive('*l', status))
-	local code = string.match(status, 'HTTP/%d*%.%d* (%d%d%d)'))
-	return self.try(tonumber(code), status)
-end
-
-function metat.__index:receiveheaders()
-	return self.try(receiveheaders(self.c))
-end
-
-function metat.__index:receivebody(headers, sink, step)
-	sink = sink or ltn12.sink.null()
-	step = step or ltn12.pump.step
-	local length = tonumber(headers['content-length'])
-	local t = headers['transfer-encoding'] -- shortcut
-	local mode = 'default' -- connection close
-	if t and t ~= 'identity' then
-		mode = 'http-chunked'
-	elseif tonumber(headers['content-length']) then
-		mode = 'by-length'
+	if headers['content-length'] then
+		mode = 'keep-open'
 	end
-	return self.try(ltn12.pump.all(socket.source(mode, self.c, length),
-		sink, step))
 end
 
-function metat.__index:receive09body(status, sink, step)
-	local source = ltn12.source.rewind(socket.source('until-closed', self.c))
-	source(status)
-	return self.try(ltn12.pump.all(source, sink, step))
+function request:read_status_line()
+	local code = string.match(self:read_line(), 'HTTP/%d*%.%d* (%d%d%d)')
+	return assert(tonumber(code), 'invalid status line')
 end
 
-function metat.__index:close()
-	return self.c:close()
+function request:read_body()
+	local te = headers['transfer-encoding']
+	if te and te ~= 'identity' then
+		self:read_chunks()
+	else
+		local len = tonumber(headers['content-length'])
+		if len then
+			self:read_content(len)
+		end
+	end
 end
-
--- High level HTTP API -------------------------------------------------------
 
 local function adjusturi(reqt)
 	local u = reqt
@@ -208,14 +137,6 @@ local function adjustheaders(reqt)
 	end
 	return lower
 end
-
--- default url parts
-local default = {
-	host = '',
-	port = _M.PORT,
-	path ='/',
-	scheme = 'http'
-}
 
 local function adjustrequest(reqt)
 	-- parse url if provided
@@ -271,31 +192,19 @@ local trequest, tredirect
 	return result, code, headers, status
 end
 
---[[local]] function trequest(reqt)
-	-- we loop until we get what we want, or
-	-- until we are sure there is no way to get it
-	local nreqt = adjustrequest(reqt)
-	local h = _M.open(nreqt.host, nreqt.port, nreqt.create)
-	-- send request line and headers
-	h:sendrequestline(nreqt.method, nreqt.uri)
-	h:sendheaders(nreqt.headers)
-	-- if there is a body, send it
-	if nreqt.source then
-		h:sendbody(nreqt.headers, nreqt.source, nreqt.step)
+function request:write_request(t)
+	self:write_request_line(t.method, t.uri)
+	self:write_headers()
+	self:write_body()
+end
+
+function request:read_response()
+	local code = self:read_status_line()
+	while code == 100 do --ignore any 100-continue messages
+		self:read_headers()
+		code = h:read_status_line()
 	end
-	local code, status = h:receivestatusline()
-	-- if it is an HTTP/0.9 server, simply get the body and we are done
-	if not code then
-		h:receive09body(status, nreqt.sink, nreqt.step)
-		return 1, 200
-	end
-	local headers
-	-- ignore any 100-continue messages
-	while code == 100 do
-		headers = h:receiveheaders()
-		code, status = h:receivestatusline()
-	end
-	headers = h:receiveheaders()
+	self:read_headers()
 	-- at this point we should have a honest reply from the server
 	-- we can't redirect if we already used the source, so we report the error
 	if shouldredirect(nreqt, code, headers) and not nreqt.source then
@@ -306,8 +215,7 @@ end
 	if shouldreceivebody(nreqt, code) then
 		h:receivebody(headers, nreqt.sink, nreqt.step)
 	end
-	h:close()
-	return 1, code, headers, status
+	return code
 end
 
 local function srequest(u, b)
@@ -328,15 +236,12 @@ local function srequest(u, b)
 	return table.concat(t), code, headers, status
 end
 
-local function pack(ok, ...)
-	return ok, {n = select('#', ...), ...}
-end
-
 function request:new(opt, body)
 	if type(opt) == 'string' then
 		return self:new{url = opt, body = body}
 	end
-	return
+	self:write_request()
+	self:read_response()
 end)
 
 return request
