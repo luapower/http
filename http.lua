@@ -80,11 +80,6 @@ http.status_messages = {
 	[511] = 'Network Authentication Required',
 }
 
-function http:read_content(size, write_content)
-	local buf, sz = self:read(size)
-	write_content(ffi.string(buf, sz))
-end
-
 function http:send_request_line(method, uri, http_ver)
 	assert(method == method:upper())
 	self:send(string.format('%s %s HTTP/%s\r\n', method, uri, http_ver))
@@ -152,7 +147,7 @@ function http:read_chunks(write_content)
 		local size = tonumber(string.gsub(line, ';.*', ''), 16) --size[; extension]
 		assert(size, 'invalid chunk size')
 		if size == 0 then break end --last chunk (trailers not supported)
-		self:read_content(size, write_content)
+		self:read_exactly(size, write_content)
 		self:read_line()
 	end
 end
@@ -170,26 +165,56 @@ function http:send_chunks(read_content)
 	end
 end
 
-function http:send_body(content)
-	if type(content) == 'string' then
-		self:send(content)
-	elseif type(content) == 'cdata' then
-		self:send(content, content_size)
-	elseif type(content) == 'table' then
-		--TODO: www-urlencoded
-	elseif type(content) == 'function' then
+function http:zlib_decoder(format, write)
+	assert(self.zlib, 'zlib not loaded')
+	local decode = coroutine.wrap(function()
+		self.zlib.inflate(coroutine.yield, write, nil, format)
+	end)
+	decode()
+	return decode
+end
+
+function http:chain_writer(write, encodings)
+	if not encodings then
+		return write
+	end
+	local enc_list = {}
+	for encoding in encodings:gmatch'[^%s,]+' do
+		table.insert(enc_list, encoding)
+	end
+	for i = #enc_list, 1, -1 do
+		local encoding = enc_list[i]
+		if encoding == 'identity' or encoding == 'chunked' then
+			--identity does nothing, chunked would already be set.
+		elseif encoding == 'gzip' then
+			write = self:zlib_decoder('gzip', write)
+		elseif encoding == 'deflate' then
+			write = self:zlib_decoder('deflate', write)
+		else
+			error'unsupported encoding'
+		end
+	end
+	return write
+end
+
+function http:send_body(content, content_size)
+	if type(content) == 'function' then
 		self:send_chunks(content)
+	elseif content then
+		self:send(content, content_size)
 	end
 end
 
-function http:read_body(headers, write_content)
-	local te = headers['transfer-encoding']
-	if te and te ~= 'identity' then
-		self:read_chunks(write_content)
+function http:read_body(headers, write)
+	write = self:chain_writer(write, headers['content-encoding'])
+	if headers['transfer-encoding'] == 'chunked' then
+		self:read_chunks(write)
 	else
 		local size = tonumber(headers['content-length'])
 		if size then
-			self:read_content(size, write_content)
+			self:read_exactly(size, write)
+		else
+			self:read_until_closed(write)
 		end
 	end
 end
@@ -215,8 +240,6 @@ function http:set_content_headers(t)
 		headers['content-length'] = #content
 	elseif type(t.content) == 'cdata' then
 		headers['content-length'] = assert(t.content_size, 'content_size missing')
-	elseif type(t.content) == 'table' then
-		headers['content-type'] = 'application/x-www-form-urlencoded'
 	end
 	return t.content, t.content_size
 end
@@ -244,6 +267,9 @@ function http:send_request(t)
 	local content, content_size = self:set_content_headers(t)
 	headers['host'] = t.host .. (t.port and ':' .. t.port or '')
 	headers['connection'] = t.close and 'close' or 'keep-alive'
+	if self.zlib then
+		headers['accept-encoding'] = 'gzip, deflate'
+	end
 	if t.user and t.password then
 		headers['authorization'] = 'Basic '
 			.. (b64.encode(t.user .. ':' .. t.password))
@@ -256,7 +282,7 @@ end
 
 --[[
 
-Parses headers:                   To do what:
+Looks at headers:                 To do what:
 --------------------------------- --------------------------------------------
 
 	transfer-encoding
@@ -303,15 +329,33 @@ end
 function http:new(t)
 	local self = setmetatable(t or {}, {__index = self})
 
-	local function read(sz)
-		return self:read(sz)
+	local function read(buf, sz)
+		return self:read(buf, sz)
 	end
-	local write, flush = stream.dynarray_writer()
-	local read_line = stream.line_reader(read, write, true)
+	local buffered_read = stream.buffered_reader(4096, read)
+	local write, flush_line = stream.dynarray_writer()
+	local read_line = stream.line_reader(buffered_read, write, true)
+
+	function self:read_exactly(n, write)
+		while n > 0 do
+			local buf, sz = assert(buffered_read(n))
+			write(buf, sz)
+			n = n - sz
+		end
+	end
 
 	function self:read_line()
 		assert(read_line())
-		return flush()
+		return flush_line()
+	end
+
+	function self:read_until_closed(write_content)
+		while true do
+			local buf, sz = buffered_read(1/0)
+			if not buf and sz == 'closed' then return end
+			assert(buf, sz)
+			write_content(buf, sz)
+		end
 	end
 
 	return self
