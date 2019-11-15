@@ -1,4 +1,7 @@
---http date parsing to os.date() format (except fields yday & isdst)
+
+--http date parsing to os.date() format.
+--Written by Cosmin Apreutesei. Public Domain.
+
 local glue = require'glue'
 
 local wdays = glue.index{'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'}
