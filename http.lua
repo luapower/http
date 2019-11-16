@@ -332,26 +332,23 @@ function http:new(t)
 	local function read(buf, sz)
 		return self:read(buf, sz)
 	end
-	local buffered_read = stream.buffered_reader(4096, read)
-	local write, flush_line = stream.dynarray_writer()
-	local read_line = stream.line_reader(buffered_read, write, true)
+	local lb = stream.linebuffer(read, '\r\n', 8192)
 
 	function self:read_exactly(n, write)
 		while n > 0 do
-			local buf, sz = assert(buffered_read(n))
+			local buf, sz = assert(lb.read(n))
 			write(buf, sz)
 			n = n - sz
 		end
 	end
 
 	function self:read_line()
-		assert(read_line())
-		return flush_line()
+		return assert(lb.readline())
 	end
 
 	function self:read_until_closed(write_content)
 		while true do
-			local buf, sz = buffered_read(1/0)
+			local buf, sz = lb.read(1/0)
 			if not buf and sz == 'closed' then return end
 			assert(buf, sz)
 			write_content(buf, sz)

@@ -75,6 +75,7 @@ local function test_client()
 	local sha2 = require'sha2'
 	local glue = require'glue'
 	print('sha2', glue.tohex(sha2.sha256(flush_body())))
+	print('sha2', glue.tohex(sha2.sha256(glue.readfile'http_test.html')))
 
 end
 
@@ -100,5 +101,5 @@ local function test_server()
 	}
 end
 
---test_client()
-test_server()
+test_client()
+--test_server()
