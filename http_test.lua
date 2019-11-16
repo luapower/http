@@ -10,6 +10,8 @@ end
 
 local function wrap_sock(sock, http)
 
+	sock:settimeout(0)
+
 	function http:read(buf, sz)
 		local s, err, p
 		while true do
@@ -56,7 +58,6 @@ local function test_client()
 
 	local sock = socket.tcp()
 	assert(sock:connect(host, 80))
-	sock:settimeout(0)
 
 	local client = http:new()
 
@@ -69,7 +70,7 @@ local function test_client()
 		},
 	}
 
-	pp(client:read_reply('GET', write_body))
+	pp(client:read_response('GET', write_body))
 	print('body', P(flush_body()))
 
 	local sha2 = require'sha2'
@@ -86,20 +87,32 @@ local function test_server()
 	local server = http:new()
 	assert(ssock:bind('127.0.0.1', 80))
 	assert(ssock:listen())
-	print'accepting'
-	local csock = assert(ssock:accept())
-	local write_body, flush_body = wrap_sock(csock, server)
 	ssock:settimeout(0)
-	local method, uri, headers = server:read_request({}, write_body)
-	print('cbody', flush_body())
-	server:send_reply{
-		status = 200,
-		headers = {
-			['content-length'] = 10,
-			content = '1234567890',
-		},
-	}
+	while true do
+		local csock, err
+		repeat
+			csock, err = ssock:accept()
+		until csock or err ~= 'timeout'
+		wrap_sock(csock, server)
+		local http_ver, method, uri, headers, body = server:read_request('string')
+		print('cbody', body)
+		local i = 0
+		local function gen_content()
+			i = i + 1
+			return i == 1 and '123' or i == 2 and '4567890' or nil
+		end
+		server:send_response{
+			status = 200,
+			content = gen_content,
+			headers = {
+				connection = 'close',
+			},
+			http_version = http_ver,
+		}
+		csock:close()
+		print'closed'
+	end
 end
 
-test_client()
---test_server()
+--test_client()
+test_server()
