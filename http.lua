@@ -308,7 +308,7 @@ function http:read_request(t, write_content)
 	local headers = {}
 	self:read_headers(headers)
 	self:read_body(headers, write_content)
-	return method, uri
+	return method, uri, headers
 end
 
 function http:send_reply(t)
