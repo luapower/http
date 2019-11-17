@@ -2,13 +2,8 @@
 -- HTTP 1.1 client & server protocol in Lua.
 -- Written by Cosmin Apreutesei. Public Domain.
 
---TODO: proxies
---TODO: www-urlencode
-
 if not ... then require'http_test'; return end
 
-local url = require'url'
-local b64 = require'libb64'
 local stream = require'stream'
 local ffi = require'ffi'
 
@@ -199,10 +194,8 @@ function http:chain_writer(write, encodings)
 		local encoding = enc_list[i]
 		if encoding == 'identity' or encoding == 'chunked' then
 			--identity does nothing, chunked would already be set.
-		elseif encoding == 'gzip' then
-			write = self:zlib_decoder('gzip', write)
-		elseif encoding == 'deflate' then
-			write = self:zlib_decoder('deflate', write)
+		elseif encoding == 'gzip' or encoding == 'deflate' then
+			write = self:zlib_decoder(encoding, write)
 		else
 			error'unsupported encoding'
 		end
@@ -210,7 +203,13 @@ function http:chain_writer(write, encodings)
 	return write
 end
 
-function http:send_body(content, content_size)
+function http:send_body(content, content_size, encoding)
+	if encoding == 'gzip' or encoding == 'deflate' then
+		assert(self.zlib, 'zlib not loaded')
+		--TODO: implement
+	elseif encoding then
+		assert(false, 'invalid encoding')
+	end
 	if type(content) == 'function' then
 		self:send_chunks(content)
 	elseif content then
@@ -238,10 +237,10 @@ function http:read_body_to_writer(headers, write, from_server)
 	end
 end
 
-function http:read_body(headers, write, ...)
+function http:read_body(headers, write, from_server)
 	if write == 'string' or write == 'buffer' then
 		local write, get = stream.dynarray_writer()
-		self:read_body_to_writer(headers, write, ...)
+		self:read_body_to_writer(headers, write, from_server)
 		local buf, sz = get()
 		if write == 'string' then
 			return ffi.string(buf, sz)
@@ -249,7 +248,7 @@ function http:read_body(headers, write, ...)
 			return buf, sz
 		end
 	else
-		self:read_body_to_writer(headers, write, ...)
+		self:read_body_to_writer(headers, write, from_server)
 	end
 end
 
@@ -261,7 +260,7 @@ function http:should_redirect(method, status, response_headers, nredirects)
 		and (not nredirects or nredirects < 20)
 end
 
-function http:set_content_headers(content, content_size, headers)
+function http:set_content_headers(headers, content, content_size)
 	if type(content) == 'string' then
 		assert(not content_size, 'content_size ignored')
 		headers['content-length'] = #content
@@ -286,48 +285,40 @@ end
 --[[
 Client sets request headers:      Based on fields:
 --------------------------------- --------------------------------------------
-	host                           host, port
-	user-agent                     headers['user-agent']
-	connection                     close
-	content-length                 content
-	transfer-encoding              content
-	content-encoding               zlib, content
-	accept-encoding                zlib
-	authorization                  user, password
-	content-type, content          post
+	host                           t.host, t.port.
+	connection                     t.close.
+	content-length                 t.content.
+	transfer-encoding              t.content.
+	accept-encoding                t.zlib.
+	content-encoding               t.compress.
 ]]
 function http:send_request(t)
 	local headers = {}
+	assert(t.host, 'host missing') --the only required field, even for HTTP/1.0.
 	headers['host'] = t.host .. (t.port and ':' .. t.port or '')
-	headers['user-agent'] = 'http.lua'
-	headers['connection'] = t.close and 'close' or 'keep-alive'
-	local content, content_size = t.content, t.content_size
-	if t.post then
-		assert(not content, 'both post and content given')
-		headers['content-type'] = 'x-www-form-urlencoded'
-		content = self:encode_post_vars(content)
+	if t.close then
+		headers['connection'] = 'close'
 	end
-	self:set_content_headers(content, content_size, headers)
 	if self.zlib then
 		headers['accept-encoding'] = 'gzip, deflate'
 	end
-	if t.user and t.password then
-		headers['authorization'] = 'Basic '
-			.. (b64.encode(t.user .. ':' .. t.password))
-	end
+	self:set_content_headers(headers, t.content, t.content_size)
 	self:override_headers(headers, t.headers)
-	self:send_request_line(t.method or 'GET', t.uri, t.http_version or '1.1')
+	self:send_request_line(t.method, t.uri, t.http_version or '1.1')
 	self:send_headers(headers)
-	self:send_body(content, content_size)
+	local content_encoding = self.zlib
+		and t.compress == true and 'gzip' or t.compress
+	self:send_body(t.content, t.content_size, content_encoding)
 end
 
 --[[
-Client reads response headers:    To do what:
+Client reads from response:       In order to:
 --------------------------------- --------------------------------------------
-	status, method                 decide whether to read the body or not
-	transfer-encoding              read the body chunked
-	content-length                 read the body
-	connection                     read the body in absence of content-length
+	status, method                 decide whether to read the body or not.
+	transfer-encoding              read the body in chunks.
+	content-encoding               decompress the body.
+	content-length                 know how much to read from the socket.
+	connection                     read the body in absence of content-length.
 ]]
 function http:read_response(method, write_content)
 	local http_ver, status = self:read_status_line()
@@ -345,11 +336,11 @@ function http:read_response(method, write_content)
 end
 
 --[[
-Server reads request headers:     To do what:
+Server reads request headers:     In order to:
 --------------------------------- --------------------------------------------
-	transfer-encoding              read the body chunked
-	content-length                 read the body
-	content-type, body             decode the x-www-form-urlencoded body
+	transfer-encoding              read the body in chunks.
+	content-encoding               decompress the body.
+	content-length                 know how much to read from the socket.
 ]]
 function http:read_request(write_content)
 	local http_ver, method, uri = self:read_request_line()
@@ -359,51 +350,55 @@ function http:read_request(write_content)
 	return http_ver, method, uri, request_headers, content
 end
 
+function http:decide_content_encoding(compress, request_headers)
+
+	local accept = request_headers['accept-encoding']
+	if not accept then return end
+
+	local available = compress and self.zlib
+		and {gzip = true, deflate = true} or {}
+
+	for s in accept:gmatch'[^,]+' do
+		local encoding, q = s:match'%s*([^%s;])%s*;%s*q%s*=%s*(.*)'
+		encoding = encoding or s:match'%s*([^%s;])' or 'identity'
+		encoding = encoding:lower()
+		q = tonumber(q) or 1
+		--TODO: *;q=0, identity;q=0, sorting by q.
+		if available[encoding] and q ~= 0 then
+			return encoding
+		end
+	end
+
+end
+
 --[[
-Server sets response headers:     Based on fields:
+Server sets response headers:     Based on:
 --------------------------------- --------------------------------------------
-	host                           host, port
-	user-agent                     headers['user-agent']
-	connection                     close
-	content-length                 content
-	transfer-encoding              content
-	content-encoding               zlib, content
-	accept-encoding                zlib
-	authorization                  user, password
+	connection: close              t.close.
+	content-length                 t.content_size or t.content's length.
+	transfer-encoding: chunked     if t.content is a reader function.
+	content-encoding: gzip|deflate t.compress, self.zlib, accept-encoding header.
 ]]
-function http:send_response(t)
+function http:send_response(t, request_headers)
 	self:send_status_line(t.status, t.status_message, t.http_version or '1.1')
 	local headers = {}
-	local content, content_size = t.content, t.content_size
-	self:set_content_headers(content, content_size, headers)
+	if t.close then
+		headers['connection'] = 'close'
+	end
+	self:set_content_headers(headers, t.content, t.content_size)
 	self:override_headers(headers, t.headers)
 	self:send_headers(headers)
-	self:send_body(content, content_size)
+	local content_encoding =
+		self:decide_content_encoding(t.compress, request_headers)
+	self:send_body(t.content, t.content_size, content_encoding)
 end
+
+self.zlib and (
 
 function http:perform_request(t, write_content)
 	self:send_request(t)
-	local method = t.method or 'GET'
-	return self:read_response(method, write_content)
+	return self:read_response(t.method, write_content)
 end
-
---
-
-function http:encode_post_vars(t)
-	--TODO:
-end
-
-function http:decode_post_vars(s)
-	--TODO:
-end
-
-function http:read_request_post_vars(content)
-	--TODO:
-	--if headers['content-type'] == 'x-www-form-urlencoded' then
-	--return self:decode_post_vars(get_body())
-end
-
---
 
 function http:new(t)
 	local self = setmetatable(t or {}, {__index = self})

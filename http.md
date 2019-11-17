@@ -1,7 +1,14 @@
 
 ## `local http = require'http'`
 
-HTTP protocol (client and server) in Lua.
+HTTP 1.1 client & server protocol in Lua.
+
+Works on an abstract I/O API made of two functions:
+
+	* `http:read(buf, maxsz) -> sz | nil,err`
+	* `http:write(buf, sz) -> true | nil,'closed'|err`
+
+Supports
 
 ## Status
 

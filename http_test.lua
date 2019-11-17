@@ -53,8 +53,11 @@ end
 
 local function test_client()
 
-	local host = 'www.websiteoptimization.com'
-	local uri = '/speed/tweak/compress/'
+	--local host = 'www.websiteoptimization.com'
+	--local uri = '/speed/tweak/compress/'
+
+	local host = 'ptsv2.com'
+	local uri = '/t/anaf/post'
 
 	local sock = socket.tcp()
 	assert(sock:connect(host, 80))
@@ -63,14 +66,18 @@ local function test_client()
 
 	local write_body, flush_body = wrap_sock(sock, client)
 
-	client:send_request{
+	local method = client:send_request{
 		uri = uri,
 		host = host,
 		headers = {
 		},
+		post = {
+			a=123,
+			b=321,
+		},
 	}
 
-	pp(client:read_response('GET', write_body))
+	pp(client:read_response(method, write_body))
 	print('body', P(flush_body()))
 
 	local sha2 = require'sha2'
@@ -114,5 +121,5 @@ local function test_server()
 	end
 end
 
---test_client()
-test_server()
+test_client()
+--test_server()
