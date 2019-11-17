@@ -81,7 +81,10 @@ http.status_messages = {
 --NOTE: method must be in uppercase.
 --NOTE: http_ver must be '1.0' or '1.1'
 function http:send_request_line(method, uri, http_ver)
-	self:send(string.format('%s %s HTTP/%s\r\n', method, uri, http_ver))
+	assert(method and method == method:upper())
+	self:send(string.format('%s %s HTTP/%s\r\n', method,
+		assert(uri),
+		assert(http_ver)))
 end
 
 function http:read_request_line()
@@ -96,7 +99,10 @@ end
 --NOTE: the message must not contain newlines.
 function http:send_status_line(status, message, http_ver)
 	message = message or self.status_messages[status]
-	self:send(string.format('HTTP/%s %d %s\r\n', http_ver, status, message))
+	self:send(string.format('HTTP/%s %d %s\r\n',
+		assert(http_ver),
+		assert(status),
+		assert(message)))
 end
 
 function http:read_status_line()
@@ -158,12 +164,11 @@ function http:read_chunks(write_content)
 	end
 end
 
-function http:send_chunks(read_content)
+function http:send_chunked(read_content)
 	while true do
 		local chunk, len = read_content()
 		if chunk then
-			local chunk, len = stream.stringdata(chunk, len)
-			self:send(string.format('%X\r\n', len))
+			self:send(string.format('%X\r\n', len or #chunk))
 			self:send(chunk, len)
 			self:send'\r\n'
 		else
@@ -174,6 +179,15 @@ function http:send_chunks(read_content)
 end
 
 function http:zlib_decoder(format, write)
+	assert(self.zlib, 'zlib not loaded')
+	local decode = coroutine.wrap(function()
+		self.zlib.inflate(coroutine.yield, write, nil, format)
+	end)
+	decode()
+	return decode
+end
+
+function http:zlib_encoder(format, write)
 	assert(self.zlib, 'zlib not loaded')
 	local decode = coroutine.wrap(function()
 		self.zlib.inflate(coroutine.yield, write, nil, format)
@@ -203,16 +217,25 @@ function http:chain_writer(write, encodings)
 	return write
 end
 
-function http:send_body(content, content_size, encoding)
+function http:send_body(content, content_size, encoding, chunked)
+	if not content then
+		return
+	end
 	if encoding == 'gzip' or encoding == 'deflate' then
 		assert(self.zlib, 'zlib not loaded')
 		--TODO: implement
 	elseif encoding then
 		assert(false, 'invalid encoding')
 	end
-	if type(content) == 'function' then
-		self:send_chunks(content)
-	elseif content then
+	if chunked then
+		self:send_chunked(content)
+	elseif type(content) == 'function' then
+		while true do
+			local chunk, len = read_content()
+			if not chunk then break end
+			self:send(chunk, len)
+		end
+	else
 		self:send(content, content_size)
 	end
 end
@@ -224,7 +247,7 @@ function http:should_read_response_body(method, status)
 	return true
 end
 
-function http:read_body_to_writer(headers, write, from_server)
+function http:read_body_to_writer(headers, write, from_server, close_connection)
 	write = self:chain_writer(write, headers['content-encoding'])
 	if headers['transfer-encoding'] == 'chunked' then
 		self:read_chunks(write)
@@ -232,15 +255,15 @@ function http:read_body_to_writer(headers, write, from_server)
 		local size = assert(tonumber(headers['content-length']),
 			'invalid content-length')
 		self:read_exactly(size, write)
-	elseif from_server and headers['connection'] ~= 'keep-alive' then
+	elseif from_server and close_connection then
 		self:read_until_closed(write)
 	end
 end
 
-function http:read_body(headers, write, from_server)
+function http:read_body(headers, write, ...)
 	if write == 'string' or write == 'buffer' then
 		local write, get = stream.dynarray_writer()
-		self:read_body_to_writer(headers, write, from_server)
+		self:read_body_to_writer(headers, write, ...)
 		local buf, sz = get()
 		if write == 'string' then
 			return ffi.string(buf, sz)
@@ -248,7 +271,7 @@ function http:read_body(headers, write, from_server)
 			return buf, sz
 		end
 	else
-		self:read_body_to_writer(headers, write, from_server)
+		self:read_body_to_writer(headers, write, ...)
 	end
 end
 
@@ -260,7 +283,7 @@ function http:should_redirect(method, status, response_headers, nredirects)
 		and (not nredirects or nredirects < 20)
 end
 
-function http:set_content_headers(headers, content, content_size)
+function http:set_content_headers(headers, content, content_size, close_connection)
 	if type(content) == 'string' then
 		assert(not content_size, 'content_size ignored')
 		headers['content-length'] = #content
@@ -269,8 +292,9 @@ function http:set_content_headers(headers, content, content_size)
 	elseif type(content) == 'function' then
 		if content_size then
 			headers['content-length'] = content_size
-		else
+		elseif not close_connection then
 			headers['transfer-encoding'] = 'chunked'
+			return true
 		end
 	end
 end
@@ -282,72 +306,58 @@ function http:override_headers(headers, user_headers)
 	end
 end
 
---[[
-Client sets request headers:      Based on fields:
---------------------------------- --------------------------------------------
-	host                           t.host, t.port.
-	connection                     t.close.
-	content-length                 t.content.
-	transfer-encoding              t.content.
-	accept-encoding                t.zlib.
-	content-encoding               t.compress.
-]]
 function http:send_request(t)
+	local http_ver = t.http_version or '1.1'
 	local headers = {}
 	assert(t.host, 'host missing') --the only required field, even for HTTP/1.0.
 	headers['host'] = t.host .. (t.port and ':' .. t.port or '')
-	if t.close then
+	local close = t.close or http_ver == '1.0'
+	if close then
 		headers['connection'] = 'close'
 	end
 	if self.zlib then
 		headers['accept-encoding'] = 'gzip, deflate'
 	end
-	self:set_content_headers(headers, t.content, t.content_size)
+	local chunked = self:set_content_headers(headers, t.content, t.content_size, close)
 	self:override_headers(headers, t.headers)
-	self:send_request_line(t.method, t.uri, t.http_version or '1.1')
+	self:send_request_line(t.method, t.uri, http_ver)
 	self:send_headers(headers)
 	local content_encoding = self.zlib
 		and t.compress == true and 'gzip' or t.compress
-	self:send_body(t.content, t.content_size, content_encoding)
+	self:send_body(t.content, t.content_size, content_encoding, chunked)
+	return close
 end
 
---[[
-Client reads from response:       In order to:
---------------------------------- --------------------------------------------
-	status, method                 decide whether to read the body or not.
-	transfer-encoding              read the body in chunks.
-	content-encoding               decompress the body.
-	content-length                 know how much to read from the socket.
-	connection                     read the body in absence of content-length.
-]]
-function http:read_response(method, write_content)
+function http:read_response(method, write_content, close)
 	local http_ver, status = self:read_status_line()
-	local response_headers = {}
+	local headers = {}
 	while status == 100 do --ignore any 100-continue messages
-		self:read_headers(response_headers)
+		self:read_headers(headers)
 		http_ver, status = self:read_status_line()
 	end
-	self:read_headers(response_headers)
+	self:read_headers(headers)
+	close = close or headers['connection'] == 'close' or http_ver == '1.0'
 	local content
 	if self:should_read_response_body(method, status) then
-		content = self:read_body(response_headers, write_content, true)
+		content = self:read_body(headers, write_content, true, close)
 	end
-	return http_ver, status, response_headers, content
+	if close then
+		self:close()
+	end
+	return http_ver, status, headers, content, close
 end
 
---[[
-Server reads request headers:     In order to:
---------------------------------- --------------------------------------------
-	transfer-encoding              read the body in chunks.
-	content-encoding               decompress the body.
-	content-length                 know how much to read from the socket.
-]]
+function http:perform_request(t, write_content)
+	local close = self:send_request(t)
+	return self:read_response(t.method, write_content, close)
+end
+
 function http:read_request(write_content)
 	local http_ver, method, uri = self:read_request_line()
-	local request_headers = {}
-	self:read_headers(request_headers)
-	local content = self:read_body(request_headers, write_content)
-	return http_ver, method, uri, request_headers, content
+	local headers = {}
+	self:read_headers(headers)
+	local content = self:read_body(headers, write_content)
+	return http_ver, method, uri, headers, content
 end
 
 function http:decide_content_encoding(compress, request_headers)
@@ -371,64 +381,64 @@ function http:decide_content_encoding(compress, request_headers)
 
 end
 
---[[
-Server sets response headers:     Based on:
---------------------------------- --------------------------------------------
-	connection: close              t.close.
-	content-length                 t.content_size or t.content's length.
-	transfer-encoding: chunked     if t.content is a reader function.
-	content-encoding: gzip|deflate t.compress, self.zlib, accept-encoding header.
-]]
 function http:send_response(t, request_headers)
 	self:send_status_line(t.status, t.status_message, t.http_version or '1.1')
 	local headers = {}
-	if t.close then
+	local close = t.close or request_headers['connection'] == 'close'
+	if close then
 		headers['connection'] = 'close'
 	end
-	self:set_content_headers(headers, t.content, t.content_size)
+	local chunked = self:set_content_headers(headers, t.content, t.content_size)
 	self:override_headers(headers, t.headers)
 	self:send_headers(headers)
 	local content_encoding =
 		self:decide_content_encoding(t.compress, request_headers)
-	self:send_body(t.content, t.content_size, content_encoding)
+	self:send_body(t.content, t.content_size, content_encoding, chunked)
+	if close then
+		self:close()
+	end
 end
 
-self.zlib and (
+--low-level API to implement
 
-function http:perform_request(t, write_content)
-	self:send_request(t)
-	return self:read_response(t.method, write_content)
+function http:close()           error'not implemented' end
+function http:read (buf, maxsz) error'not implemented' end
+function http:send (buf, sz)    error'not implemented' end
+
+--linebuffer-based read API
+
+function http:read_exactly(n, write)
+	local read = self.linebuffer.read
+	while n > 0 do
+		local buf, sz = read(n)
+		assert(buf, 'short read')
+		write(buf, sz)
+		n = n - sz
+	end
 end
+
+function http:read_line()
+	return assert(self.linebuffer.readline())
+end
+
+function http:read_until_closed(write_content)
+	local read = self.linebuffer.read
+	while true do
+		local buf, sz = read(1/0)
+		if not buf and sz == 'closed' then return end
+		assert(buf, sz)
+		write_content(buf, sz)
+	end
+end
+
+--instantiation
 
 function http:new(t)
 	local self = setmetatable(t or {}, {__index = self})
-
 	local function read(buf, sz)
 		return self:read(buf, sz)
 	end
-	local lb = stream.linebuffer(read, '\r\n', 8192)
-
-	function self:read_exactly(n, write)
-		while n > 0 do
-			local buf, sz = assert(lb.read(n))
-			write(buf, sz)
-			n = n - sz
-		end
-	end
-
-	function self:read_line()
-		return assert(lb.readline())
-	end
-
-	function self:read_until_closed(write_content)
-		while true do
-			local buf, sz = lb.read(1/0)
-			if not buf and sz == 'closed' then return end
-			assert(buf, sz)
-			write_content(buf, sz)
-		end
-	end
-
+	self.linebuffer = stream.linebuffer(read, '\r\n', 8192)
 	return self
 end
 

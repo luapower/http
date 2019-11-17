@@ -42,6 +42,10 @@ local function wrap_sock(sock, http)
 		assert(sock:send(s))
 	end
 
+	function http:close()
+		sock:close()
+	end
+
 	local t = {}
 	return function(buf, sz)
 		local s = ffi.string(buf, sz)
@@ -71,10 +75,9 @@ local function test_client()
 		host = host,
 		headers = {
 		},
-		post = {
-			a=123,
-			b=321,
-		},
+		method = 'POST',
+		content = '',
+		close = true,
 	}
 
 	pp(client:read_response(method, write_body))

@@ -4,13 +4,11 @@
 
 local zlib = require'zlib'
 local loop = require'socketloop'
-local url = require'url'
-local http = require'http_request'
+local uri = require'uri'
 local http_cookie = require'http_cookie'
-local http_date = require'http_date'
-local ltn12 = require'ltn12'
 local glue = require'glue'
 local tuple2 = glue.tuples(2)
+
 local fs = require'fs'
 local path = require'path'
 

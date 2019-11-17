@@ -1,0 +1,415 @@
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+   "http://www.w3.org/TR/html4/loose.dtd"><html>
+<head>
+<title>HTTP Compression - content encoding can compress xhtml, css, and javascript for faster web page download times web compression</title>
+   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" >
+
+<link rel="stylesheet" href="/css/styles5.css" type="text/css" media="screen, projection">
+<link rel="stylesheet" media="print" href="/css/print.css" type="text/css">
+<link rel="author" href="https://plus.google.com/116288721042233147019"/>
+<!--[if lt IE 6]>
+<link rel="stylesheet" type="text/css" href="/css/ie.css">
+<![endif]-->
+
+<meta name="description" content="HTTP compression uses standards-based gzip and deflate compression algorithms to compress your XHTML, CSS, and JavaScript to speed up web page downloads and save bandwidth. " >
+<meta name="keywords" content="http compression content encoding gzip web compression expedia orbitz speed up the web compress gzip deflate compress fast web page download time response times http compress gzip encode text compression techniques" >
+<link rel="start" href="http://www.websiteoptimization.com/speed/tweak/" title="Home" >
+
+<link rel="prev" href="http://www.websiteoptimization.com/speed/tweak/web-page-performance-thesis/" title="Web Page Performance Thesis" >
+
+
+<link rel="next" href="http://www.websiteoptimization.com/speed/tweak/memory-markers/" title="Memory Markers and the Subjective Duration of Experience" >
+
+<script type="text/javascript" language="javascript">
+<!--
+
+var HOST = 'www.websiteoptimization.com';
+
+// Copyright (c) 1996-1997 Athenia Associates.
+// http://www.webreference.com/js/
+// License is granted if and only if this entire
+// copyright notice is included. By Tomer Shiran.
+
+function setCookie (name, value, expires, path, domain, secure) {
+    var curCookie = name + "=" + escape(value) + (expires ? "; expires=" + expires : "") + (path ? "; path=" + path : "") + (domain ? "; domain=" + domain : "") + (secure ? "secure" : "");
+    document.cookie = curCookie;
+}
+
+function getCookie (name) {
+    var prefix = name + '=';
+    var c = document.cookie;
+    var nullstring = '';
+    var cookieStartIndex = c.indexOf(prefix);
+    if (cookieStartIndex == -1)
+        return nullstring;
+    var cookieEndIndex = c.indexOf(";", cookieStartIndex + prefix.length);
+    if (cookieEndIndex == -1)
+        cookieEndIndex = c.length;
+    return unescape(c.substring(cookieStartIndex + prefix.length, cookieEndIndex));
+}
+
+function deleteCookie (name, path, domain) {
+    if (getCookie(name))
+        document.cookie = name + "=" + ((path) ? "; path=" + path : "") + ((domain) ? "; domain=" + domain : "") + "; expires=Thu, 01-Jan-70 00:00:01 GMT";
+}
+
+function fixDate (date) {
+    var base = new Date(0);
+    var skew = base.getTime();
+    if (skew > 0)
+        date.setTime(date.getTime() - skew);
+}
+
+function rememberMe (f) {
+    var now = new Date();
+    fixDate(now);
+    now.setTime(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+    now = now.toGMTString();
+    if (f.author != undefined)
+       setCookie('mtcmtauth', f.author.value, now, '/', '', '');
+    if (f.email != undefined)
+       setCookie('mtcmtmail', f.email.value, now, '/', '', '');
+    if (f.url != undefined)
+       setCookie('mtcmthome', f.url.value, now, '/', '', '');
+}
+
+function forgetMe (f) {
+    deleteCookie('mtcmtmail', '/', '');
+    deleteCookie('mtcmthome', '/', '');
+    deleteCookie('mtcmtauth', '/', '');
+    f.email.value = '';
+    f.author.value = '';
+    f.url.value = '';
+}
+
+//-->
+</script>
+
+</head>
+<body id="sp" class="sp onecol">
+
+<div class="container">
+<!-- Header -->
+<div id="header">
+<div id="logo"><a href="/"><img src="/img/WSOlogo.png" alt="Website Optimization" width="72" height="81" border="0"></a></div>
+<div id="WSOheadertext"><h1><a href="http://www.websiteoptimization.com/" title="website optimization com, access key h.">WebSiteOptimization.com</a></h1>
+<p><a class="top" href="/" title="higher traffic and speed guaranteed, home, access key h.">Higher traffic and speed guaranteed.&trade;</a></p></div>
+	<div id="nav">
+
+	  <ul>
+		<li><a href="/">Home</a></li>
+		<li><a href="/services/" title="go to services, access key s." accesskey="s">Services</a></li>
+		<li><a href="/publications/" title="go to publications, access key p." accesskey="p">Publications</a></li>
+		<li><a href="/about/" title="go to about page, access key a." accesskey="a">About</a></li>
+		<li><a href="/sitemap/" title="go to sitemap, access key m." accesskey="m">Sitemap</a></li>
+		<li><a id="contact" href="/contact/" title="contact us @ 877.748.3678, access key c." accesskey="c"><span class="headerphone">877.SITE.OPT</span><br>Contact Us</a></li>
+	  </ul>
+	</div>
+</div>
+</div>
+<!-- End Header -->
+  <div class="clear"></div>
+
+<!-- navmain sub search bar starts here -->
+
+<script type="text/javascript">
+function clearText(thefield){
+if (thefield.defaultValue==thefield.value)
+thefield.value = ""
+} 
+</script>
+<!-- subnav (yellow) with search subscribe phone -->  
+<div id="contentwrap">
+	<div id="subsearch">
+		<div class="search">
+                        <div class="module-content">
+                           <form method="get" action="http://www.websiteoptimization.com/cgi-bin/mt/mt-search.cgi">
+                              <input type="hidden" name="IncludeBlogs" value="1">
+                              <input type="hidden" name="IncludeBlogs" value="2">
+                              <input type="hidden" name="IncludeBlogs" value="3">
+                              <input type="hidden" name="IncludeBlogs" value="4">
+                              <input class="searchbox" name="search" size="20">
+					<input type="submit" value="Search" class="searchbutton">
+                           </form>
+                        </div>
+		</div>
+		<!-- end search -->
+		<div class="phone">Call (877) SITE-OPT <small>(748-3678)</small></div>
+		<div class="subscribetext"><a class="newslettertext" href="http://www.optimizationweek.com" accesskey="n" title="go to optimizationweek.com newsletter, access key n.">Free Newsletter</a></div>
+
+<div class="subscribe">
+	<form action="http://optimizationweek.com/mailman/subscribe/news_optimizationweek.com" method="POST">
+		<input type="text" name="email" value="enter e-mail" size="20"  onfocus="clearText(this)">
+		<input type="submit" value="Subscribe" class="subscribebutton" name="subscribe">
+		<input type="hidden" name="url" value="http://optimizationweek.com/about/thanks.html">
+	</form>
+</div>
+<!-- end searchbox -->
+	</div> 
+
+<div id="bodycontent">
+<div id="bodytext">
+
+		<div id="BreadCrumbs" class="bc">
+			<ul>
+				<li><a href="/">home</a> &gt; </li>
+				<li><a href="../../../speed/">speed</a> &gt; </li> <li><a href="../../tweak/">tweak</a> &gt; </li> <li class="last"><a href="../compress/">compress</a></li>			</ul>
+		</div>
+		
+<div id="nextprev" class="bc">
+
+<a href="http://www.websiteoptimization.com/speed/tweak/web-page-performance-thesis/">&laquo; Web Page Performance Thesis</a> |
+
+<a href="http://www.websiteoptimization.com/speed/tweak/">Main</a>
+
+| <a href="http://www.websiteoptimization.com/speed/tweak/memory-markers/">Memory Markers and the Subjective Duration of Experience &raquo;</a>
+
+</div>
+
+<h1>HTTP Compression</h1>
+<div id="summary"><b>Summary</b>: HTTP compression uses standards-based gzip and deflate compression algorithms to compress your XHTML, CSS, and JavaScript to speed up web page downloads and save bandwidth. </div>
+<p>HTTP compression, otherwise known as content encoding, is a publicly defined way to compress textual content transferred from web servers to browsers. HTTP compression uses public domain compression algorithms, like gzip and compress, to compress XHTML, JavaScript, CSS, and other text files at the server.  This standards-based method of delivering compressed content is built into HTTP 1.1, and most modern browsers that support HTTP 1.1 support ZLIB inflation of deflated documents. In other words, they can decompress compressed files automatically, which saves time and bandwidth.  <span id="a000059more"><span id="more"><p>Stephen Pierzchala, Senior Technical Performance Analyst with Gomez, said this about HTTP compression:</p>
+
+<p><blockquote>"When tied to other methods, such as proper caching configurations and the use of persistent connections, HTTP compression can greatly improve Web performance. In most cases, the total cost of ownership of implementing HTTP compression (which for users of some Web platforms is nothing!) is extremely low, and it will pay for itself in reduced bandwidth usage and improved customer satisfaction."</blockquote></p>
+
+<h2>The Browser / Server Conversation</h2>
+
+<p>Browsers and servers have brief conversations over what they'd like to receive and send. Using HTTP headers, they zip messages back and forth over the ether with their content shopping lists. A compression-aware browser tells servers it would prefer to receive encoded content with a message in the HTTP header like this:</p>
+
+<pre><code>GET / HTTP/1.1
+Host: www.webcompression.org
+User-Agent: Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.5) 
+  Gecko/20031007 Firebird/0.7
+Accept: text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,
+  text/plain;q=0.8,video/x-mng,image/png,image/jpeg,image/gif;q=0.2,*/*;q=0.1
+Accept-Language: en-us,en;q=0.5
+<span class="highlight">Accept-Encoding: gzip,deflate</span>
+Accept-Charset: ISO-8859-1,utf-8;q=0.7,*;q=0.7
+Keep-Alive: 300
+Connection: keep-alive</pre></code>
+
+<p>An HTTP 1.1-compliant server would then deliver the requested document with using an encoding accepted by the client. Here's a sample response from <a href="http://www.webcompression.org">WebCompression.org</a>:</p>
+
+<pre><code>HTTP/1.1 200 OK
+Date: Thu, 04 Dec 2003 16:15:12 GMT
+Server: Apache/2.0
+Vary: Accept-Encoding
+<span class="highlight">Content-Encoding: gzip</span>
+Cache-Control: max-age=300
+Expires: Thu, 04 Dec 2003 16:20:12 GMT
+X-Guru: basic-knowledge=0, general-knowledge=0.2, complete-omnipotence=0.99
+Content-Length: 1533
+Content-Type: text/html; charset=ISO-8859-1</code></pre>
+
+<p>Now the client knows that the server supports gzip content encoding, and it also knows the size of the file (content-length). The client downloads the compressed file, decompresses it, and displays the page. At least, that is the way it is supposed to work.</p>
+
+<h2>Browsers Can Lie</h2>
+
+<p>Unfortunately, some early versions of Netscape 4 say they support ZLIB inflation when they really can't. Rather than rely on the content negotiation built into Apache and IIS, most webmasters install software specifically designed to make this conversation an amicable one. Products like mod_gzip, Vigos' Website Accelerator, PipeBoost, httpZip, and others offer configurable compression that can avoid browser quirks.</p>
+
+<h2>Average Compression Ratios</h2>
+
+<p>So what can you expect to save using HTTP compression? In tests that we ran on twenty popular sites we found that on average, <a href="http://www.websiteoptimization.com/speed/18/18-2t.html">content encoding saved 75%</a> off of text files (HTML, CSS, and JavaScript) and 37% overall.<small><sup>1</sup></small> A similar study of 9,281 HTML pages of popular sites by Destounis et. al found a mean compression gain of 75.2%.<small><sup>2</sup></small> On average, web compression reduced the text files tested to one-fourth of their original size.<small><sup>3</sup></small> The more text-based content you have, the higher the savings.</p>
+
+<p>Joe Lima, COO and Head of Product Development at Port80 Software, said this about HTTP compression:</p>
+
+<p><blockquote>"HTTP compression provides such a clear benefit that it appeals to all kinds of users.  Our customers include consumer sites that want to improve end-users' experience, hosting providers seeking to differentiate their offering, Fortune 500's looking to make a specific extranet application as bandwidth-efficient as possible, and many others.  Simply put, compression is easy to deploy, widely supported, and saves money.  Who could say no to that?"
+</blockquote></p>
+<h3>File Size Savings for Sites Using HTTP Compression</h3>
+
+<p>Here are three examples from popular sites that use HTTP compression. Google and Orbitz both use gzip compression to deliver compressed versions of their  pages to HTTP 1.1-compliant browsers. Table 1 shows the size of their home pages plus one search results page before and after compression.</p>
+
+<br clear="right">
+<table width="100%" class="data t" cellspacing="0" cellpadding="5" border="1" summary="This table shows two site home page size using http compression with three columns listing the site, the size of the html page uncompressed and compressed, listed in two rows, one for each site.">
+<caption align="top"><h3>Table 1: HTTP Compression with Google and Orbitz (file size in bytes)</h3></caption>
+<thead><tr class="light"><th scope="col">Home page</th><th scope="col">HTML Page Size (uncompressed)</th><th scope="col">HTML Page Size (compressed)</th><th scope="col">Percentage savings</th></tr></thead>
+<tbody>
+<tr><td><a href="http://www.google.com">Google.com</a></td><td>3,873</td><td class="http">1,412</td><td>63.5%</td></tr> 
+<tr><td><a href="http://www.google.com/search?hl=en&ie=ISO-8859-1&q=http+compression">Google HTTP+Compression</a></td><td>26,321</td><td class="http">5,505</td><td>79.1%</td></tr> 
+<tr><td><a href="http://www.orbitz.com">Orbitz.com</a></td><td>44,183</td><td class="http">9,046</td><td>79.5%</td></tr>
+</tbody>
+</table>
+<p>Note: These figures do not include HTTP header size, just the HTML size.</p>
+
+<p>Typical savings on compressed text files range from 60% to 85%, depending on how redundant the code is. Some JavaScript files can actually be compressed by over 90%. Webmasters who have deployed HTTP compression on their servers report savings of 30 to 50% off of their bandwidth bills. Compressed content also speeds up your site by requiring smaller downloads. The cost of decompressing compressed content is small compared to the cost of downloading uncompressed files. On narrowband connections with faster computers CPU speed trumps bandwidth every time.</p>
+<hr>
+<p><small><sup>1</sup></small>Andy King and Konstantin Balashov, <i>Speed Up Your Site: Web Site Optimization</i> (Indianapolis: New Riders Publishing, 2003), Chapter 18, "Compressing the Web," 412. See <a href="http://www.speedupyoursite.com/18/18-2t.html">Table 18.2: Content Encoding Average Compression Ratios for Different Web Site Categories</a>.</p>
+<p><small><sup>2</sup></small>P. Destounis, J. Garofalakis, P. Kappos, and J. Tzimias, "Measuring the Mean Web page size and its compression to limit latency and improve download time," <i>Internet Research: Electronic Networking Applications and Policy</i> 11, no. 1 (2001): 15. Analyzing five popular web sites (cnn.com, disney.com, ibm.com, microsoft.com, and netscape.com) Destounis et. al found a mean compression gain of 75.2% across 9,281 HTML pages. The mean web page size was 13,540 bytes.</p>
+<p><small><sup>3</sup></small>Compression efficiency depends on the repetition of content within a given file. Smaller files have fewer bytes, and therefore a lower probability of repeated bytes. As file size increases compression ratios improve because more characters means more opportunities for similar patterns. The above tests ranged from a 13,540 byte mean (Destounis 2001) to 44,582 bytes per HTML page (King 2003). Smaller files (5,000 bytes or less) typically compress less efficiently, while larger files typically compress more efficiently. The more redundancy you can build into your textual data (HTML, CSS, and JavaScript) the higher your potential compression ratio. That's why using all lowercase letters improves compression in XHTML.</p>
+
+<h2>Further Reading</h2>
+<dl>
+<dt><a href="http://www.websiteoptimization.com/speed/18/">Compressing the Web</a></dt><dd>Chapter 18 of Speed Up Your Site shows how to set up HTTP compression on Apache and IIS servers and evaluates the available compression software. Lists software and hardware compression tools for web compression.</dd>
+<dt><a href="http://www.gomez.com">Gomez, Inc.</a></dt><dd>A performance management and monitoring company.</dd>
+<dt><a href="http://www.pierzchala.com/grabit2/">GrabIT2</a></dt><dd>Stephen Pierzchala's configurable URL-based page grabber shows HTTP headers and page characteristics.</dd>
+<dt><a href="http://www.webreference.com/internet/software/servers/http/compression/">HTTP Compression Speeds the Web</a></dt><dd>Introductory article on content encoding by Peter Cranstone.</dd>
+<dt><a href="http://www.optimizationweek.com/reviews/travel/">Overweight Travel Sites Delay Holiday Travelers</a></dt><dd>Compares the home pages of Expedia, Orbitz, and Travelocity for speed and accessibility. Orbitz uses HTTP compression. From Optimization Week Magazine, Dec. 4, 2003.</dd>
+<dt><a href="http://www.webperformance.org/cach-comp-perf.html">Performance Improvement From Caching and Compression</a></dt><dd>Adding caching to compression can boost performance, by Stephen Pierzchala in April 2003.</dd>
+<dt><a href="http://www.webperformance.org/compression-performance.html">Performance Improvement From Compression</a></dt><dd>Stephen Pierzchala tests how HTTP compression can improve web performance. Concludes that data compression works best with files over 5,000 bytes. April 2003.</dd>
+<dt><a href="http://www.port80software.com">Port80 Software. Fortune 1000 Survey</a></dt>
+<dt><a href="http://www.port80software.com/surveys/top1000compression/">Port80 Software's Fortune 1000 Compression Survey</a></dt><dd>Port80 Software found that only 3% of the Fortune 1000 uses HTTP compression.</dd>
+<dt><a href="http://www.optimizationweek.com/reviews/shopping/">Slow Shopping Sites Delay Santa: Scrooge Response Times</a></dt><dd>Five out of fourteen top shopping sites use HTTP compression on their home pages. By Andrew King of Optimization Week Magazine, Dec. 17, 2003.</dd>
+<dt><a href="http://www-106.ibm.com/developerworks/web/library/wa-httpcomp/">Speed Web delivery with HTTP compression</a></dt><dd>A detailed look at the beneficial effects of data compression with HTTP 1.1 by Radhakrishnan Srinivasan of IBM. July 22, 2003.</dd>
+<dt><a href="http://www.webcompression.org/">WebCompression.org</a></dt><dd>Stephen Pierzchala's compression information resource.</dd>
+</dl>
+
+<p>Article originally published on December 4, 2003.</p></span></span>
+<p class="posted">By <a href="http://www.websiteoptimization.com">website optimization</a> on 22 Sep 2009 AM</p>
+
+</div>
+
+    </div>
+</div>
+
+<!-- Footer -->
+<div id="footerwrap" class="center">
+<div class="container">
+<div id="footer">
+<div id="footleft">
+<h4><a href="/services/marketing/search-engine/">SEO</a> &amp; <a href="/services/web-development/design">redesign</a> increased new patients by 100X!</h4>
+<p><a target="_new" href="/secrets/seo-case-study-phillydentistry.pdf"><img src="/img/phillydentistry-case-study.png" width="206" height="160" alt="phillydentistry.com case study"></a><br>
+<small>PhillyDentistry.com</small>
+</p>
+</div>
+<div class="footmidleft"><h4><a href="/services/speed/">Web Performance Services</a></h4>
+<p>Increased speeds by 30-90% with our analysis and optimization services.</p>
+<ul>
+<li>AOL.com</li>
+<li>Aruba.com</li>
+<li>Caravan Tours</li>
+<li>Bank of America</li>
+<li>Time Warner</li>
+<li>Wells Fargo</li>
+<li>WhitePages.com</li>
+</ul>
+<img src="/t.gif" width="1" height="7" alt="">
+</div>
+<div class="footmidrt">
+<h4><a href="/services/marketing/multivariate-testing/">Conversion Rate Optimization</a></h4>
+<p>Increase conversions with adaptive multivariate testing to squeeze more leads out of your exiating traffic. Quickly boost your ROI.<br>
+</p>
+<p><img src="/img/adaptive-conversion.png" width="205" height="104" alt="adaptive conversion rate optimization"></p>
+
+</div>
+<div id="footright"><h4><a href="/services/web-development/">Web Development</a></h4>
+<p>Improve your site's look, usability and accessibility for a more credible and successful website.</p>
+<ul>
+<li>Professional redesigns</li>
+<li>Accessibility reviews</li>
+<li>Usability reviews</li>
+<li>CMS development</li>
+<li>Multimedia optimization</li>
+<li>Custom programming</li>
+</ul>
+</div>
+</div>
+
+</div>
+<!--
+ <div id="footerbasewrap">
+<div class="container">
+<div id="footerbase" class="center">
+Copyright &#169; 2002-2010 <a href="/">Website Optimization</a>, LLC. All Rights Reserved - Free <a href="/services/analyze/">website speed test</a> - <a href="/about/privacy.html">Privacy Policy</a>
+<br>
+Last modified: August 26, 2013. 
+</div>
+</div>
+</div>
+-->
+<script type="text/javascript"> 
+(function(a,e,c,f,g,b,d){var
+h={ak:"1071120676",cl:"rcQ9COjS8F4QpILg_gM"};a[c]=a[c]||function(){(a[c].q=a[c].q||[]).push(arguments)};a[f]||(a[f]=h.ak);b=e.createElement(g);b.async=1;b.src="//www.gstatic.com/wcm/loader.js";d=e.getElementsByTagName(g)[0];d.parentNode.insertBefore(b,d);a._googWcmGet=function(b,d,e){a[c](2,b,h,d,null,new
+Date,e)}})(window,document,"_googWcmImpl","_googWcmAk","script"); 
+</script>
+
+<script type="text/javascript">
+
+ 
+  var callback = function(formatted_number, mobile_number) {
+
+var
+c = "b,p,span";
+
+var
+c1= c.split(",");
+
+for(v=0;v<c1.length;v++)
+
+{
+
+var
+m = document.getElementsByTagName(c1[v]);
+
+var
+len = m.length;
+
+for(i=0;i<len;i++)
+
+{
+
+var
+c =
+m[i].innerHTML.replace("(877.748.3678)",formatted_number).replace("734.476.6611",formatted_number).replace("877.SITE.OPT",formatted_number);
+
+m[i].innerHTML
+= c;
+
+}
+
+}
+
+//jQuery('a[]').attr('href',"tel:"+mobile_number);
+
+};
+
+  </script>
+
+<script>
+
+  window.onload = function()
+  {
+      _googWcmGet(callback,"(877.748.3678)");
+  }
+
+</script>
+
+
+
+
+
+<!-- End Footer -->
+</div>
+<div id="footerbasewrap">
+<div class="container">
+<div id="footerbase" class="center">
+Copyright &#169; 2002-2018 <a href="/">Website Optimization</a>, LLC. All Rights Reserved - Free <a href="/services/analyze/">website speed test</a> - <a href="/about/privacy.html">Privacy Policy</a>
+<br>
+Last modified: August 26, 2013. 
+<p>Follow us on: <a href="https://twitter.com/WOptimization" target="_new">Twitter</a>,  <a href="https://plus.google.com/108123505155721216764/" target="_new">Google+</a>,  <a href="https://www.facebook.com/websiteoptimizationllc" target="_new">Facebook</a>,  <a href="http://www.linkedin.com/company/website-optimization" target="_new">Linked In</a></p>
+</div>
+</div>
+</div>
+
+<!-- Google Code for Remarketing Tag -->
+<!--------------------------------------------------
+Remarketing tags may not be associated with personally identifiable information or placed on pages related to sensitive categories. See more information and instructions on how to setup the tag on: http://google.com/ads/remarketingsetup
+--------------------------------------------------->
+<script type="text/javascript">
+/* <![CDATA[ */
+var google_conversion_id = 1071120676;
+var google_custom_params = window.google_tag_params;
+var google_remarketing_only = true;
+/* ]]> */
+</script>
+<script type="text/javascript" src="//www.googleadservices.com/pagead/conversion.js">
+</script>
+<noscript>
+<div style="display:inline;">
+<img height="1" width="1" style="border-style:none;" alt="" src="//googleads.g.doubleclick.net/pagead/viewthroughconversion/1071120676/?guid=ON&amp;script=0"/>
+</div>
+</noscript>
+
+
+
+</body></html>
