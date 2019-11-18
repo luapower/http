@@ -1,33 +1,26 @@
-Content-Range
+- ranges: Range, If-Range, Accept-Ranges, Content-Range, If-Unmodified-Since
+- static file handler: last-modified, if-modified-since
+- generate ETags, If-match, If-None-Match response
+- traliers: TE, Trailer
+
 
 Expires
 Last-Modified
 Cache-Control
 
-Trailer
+
 
 
 CLIENT
 ------------------------------------------------------------------------------
-
 Expect
 
-If-Match
-If-Modified-Since
-If-None-Match
-If-Range
-If-Unmodified-Since
-
-Range
-TE
 
 
 SERVER
 ------------------------------------------------------------------------------
 
-Accept-Ranges
 Age
-ETag
 Location
 Retry-After
 Vary
