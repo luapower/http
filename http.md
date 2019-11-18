@@ -21,7 +21,7 @@ GZip (de)compression can be enabled with `http.zlib = require'zlib'`.
 
 ## Client-side API
 
-`http:perform_request(t, write_content) -> http_ver, status, headers, content, closed`
+`http:perform_request(t, write_content) -> http_version, status, headers, content, closed`
 
 --------------------------------- --------------------------------------------
 Client sets request headers:      Based on:
@@ -44,10 +44,10 @@ connection                        read the body in absence of content-length.
 
 ## Server-side API
 
-`http:read_request(write_content) -> http_ver, method, uri, headers, content`
+`http:read_request(write_content) -> http_version, method, uri, headers, content`
 
 --------------------------------- --------------------------------------------
-Server reads request headers:     In order to:
+Server reads from request:        In order to:
 --------------------------------- --------------------------------------------
 transfer-encoding                 read the body in chunks.
 content-encoding                  decompress the body.
@@ -63,4 +63,8 @@ connection: close                 t.close.
 content-length                    t.content_size or t.content's length.
 transfer-encoding: chunked        if t.content is a reader function.
 content-encoding: gzip|deflate    t.compress, self.zlib, accept-encoding header.
+allow                             t.allowed_methods
+date                              os.time()
+content-type                      t.content_type, t.content_types, accept header.
 --------------------------------- --------------------------------------------
+

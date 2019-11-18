@@ -1,13 +1,11 @@
 
-local hparse = require'http_parser'.headers
-local vparse = require'http_headers'.parse_values
-
-local function readbuffer(s)
-	return {readline = s:gmatch'(.-)\r?\n'}
-end
+local headers = require'http_headers'
 
 local function dump(s)
-	pp(vparse(hparse(readbuffer(s))))
+	for s in s:gmatch'(.-)\r?\n' do
+		local k, v = s:match'(.-)%s*:(.*)'
+		pp(
+	end
 end
 
 dump[[
@@ -97,17 +95,16 @@ X-Powered-By: PHP/5.4.0
 X-UA-Compatible: IE=EmulateIE7
 X-UA-Compatible: IE=edge
 X-UA-Compatible: Chrome=1
-
 ]]
 
 dump[[
 Authorization: Digest username="Mufasa",
-                     realm="testrealm@host.com",
-                     nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093",
-                     uri="/dir/index.html",
-                     qop=auth,
-                     nc=00000001,
-                     cnonce="0a4f113b",
-                     response="6629fae49393a05397450978507c4ef1",
-                     opaque="5ccc069c403ebaf9f0171e9517f40e41"
+	realm="testrealm@host.com",
+	nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093",
+	uri="/dir/index.html",
+	qop=auth,
+	nc=00000001,
+	cnonce="0a4f113b",
+	response="6629fae49393a05397450978507c4ef1",
+	opaque="5ccc069c403ebaf9f0171e9517f40e41"
 ]]

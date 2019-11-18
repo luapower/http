@@ -31,19 +31,20 @@ local function wrap_sock(sock, http)
 			ffi.copy(buf, p, #p)
 		end
 		local s = ffi.string(buf, sz)
-		print('recv', P(s))
+		print('recv', sock, P(s))
 		return n
 	end
 
 	function http:send(buf, sz)
 		sz = sz or #buf
 		local s = ffi.string(buf, sz)
-		print('send', P(s))
+		print('send', sock, P(s))
 		assert(sock:send(s))
 	end
 
 	function http:close()
 		sock:close()
+		print('closed', sock)
 	end
 
 	local t = {}
@@ -70,7 +71,7 @@ local function test_client()
 
 	local write_body, flush_body = wrap_sock(sock, client)
 
-	local method = client:send_request{
+	pp(client:perform_request({
 		uri = uri,
 		host = host,
 		headers = {
@@ -78,10 +79,9 @@ local function test_client()
 		method = 'POST',
 		content = '',
 		close = true,
-	}
+	}, write_body))
 
-	pp(client:read_response(method, write_body))
-	print('body', P(flush_body()))
+	print('body', sock, P(flush_body()))
 
 	local sha2 = require'sha2'
 	local glue = require'glue'
@@ -104,25 +104,22 @@ local function test_server()
 			csock, err = ssock:accept()
 		until csock or err ~= 'timeout'
 		wrap_sock(csock, server)
-		local http_ver, method, uri, headers, body = server:read_request('string')
-		print('cbody', body)
+		local req = server:read_request('string')
+		print('cbody', csock, req.content)
 		local i = 0
 		local function gen_content()
 			i = i + 1
 			return i == 1 and '123' or i == 2 and '4567890' or nil
 		end
-		server:send_response{
-			status = 200,
+		server:send_response({
 			content = gen_content,
-			headers = {
-				connection = 'close',
-			},
-			http_version = http_ver,
-		}
-		csock:close()
-		print'closed'
+			--close = true,
+			http_version = req.http_version,
+			compress = true,
+			content_type = 'text/plain',
+		}, method, req_headers)
 	end
 end
 
-test_client()
---test_server()
+--test_client()
+test_server()

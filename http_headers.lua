@@ -20,8 +20,9 @@ function name(s) --Some-Name -> some_name
 end
 
 local function int(s) --"123" -> 123
-	s = tonumber(s)
-	return s and math.floor(s) == s and s or nil
+	local n = tonumber(s)
+	assert(n and math.floor(n) == n, 'invalid integer')
+	return n
 end
 
 local function unquote(s)
@@ -126,7 +127,7 @@ local function valueparams(t, parsers, i, j) --value[;paramlist] -> t,i,j, param
 	i,j = i or 1, j or #t
 	local ii = tfind(t,';',i,j)
 	local j_before_params = ii and ii-1 or j
-	local params = ii and kvlist(t, ';', parsers, ii+1, j)
+	local params = ii and kvlist(t, ';', parsers, ii+1, j) or {}
 	return t,i,j_before_params, params
 end
 
@@ -158,9 +159,9 @@ function parse.accept(s) --#( type "/" subtype ( ";" token [ "=" ( token | quote
 	local dt = {}
 	for t,i,j, params in valueparamslist(s, accept_parse) do
 		local type_, slash, subtype = unpack(t,i,j)
-		if slash ~= '/' or not subtype then return end
+		assert(slash == '/' and subtype, 'invalid media type')
 		type_, subtype = name(type_), name(subtype)
-		dt[string.format('%s/%s', type_, subtype)] = params or true
+		dt[string.format('%s/%s', type_, subtype)] = params or {}
 	end
 	return dt
 end
@@ -168,7 +169,7 @@ end
 local function accept_list(s) ----1#( ( token | "*" ) [ ";" "q" "=" qvalue ] )
 	local dt = {}
 	for t,i,j, params in valueparamslist(s, accept_parse) do
-		dt[name(t[i])] = params or true
+		dt[name(t[i])] = params
 	end
 	return dt
 end
@@ -564,16 +565,19 @@ parse.x_powered_by = glue.pass  --PHP/5.2.1
 --parsing API
 
 function headers.parse(k, v)
-	local k = k:gsub('-', '_')
-	if parse[k] then return parse[k](v) end
+	local uk = k:gsub('-', '_')
+	if parse[uk] then return parse[uk](v) end
 	return v --unknown header, return unparsed
 end
 
---lazy parse headers: headers.parsed(t) -> t; t.header_name -> parsed_value
-function headers.parsed(t)
-	return setmetatable({}, {__index = function(dt, k)
-		dt[k] = headers.parse(k, t[k])
-		return rawget(dt,k)
+--lazy parsing: headers.parsed(t) -> t; t.header_name -> parsed_value
+function headers.parsed(rawheaders)
+	return setmetatable({}, {__index = function(self, k)
+		local s = rawheaders[k]
+		if s == nil then return nil end
+		local v = headers.parse(k, s)
+		rawset(self, k, v)
+		return v
 	end})
 end
 
@@ -584,25 +588,58 @@ local base64 = b64.encode_string
 
 local function int(v)
 	glue.assert(math.floor(v) == v, 'integer expected')
-	return tostring(v)
+	return v
+end
+
+local function date(t)
+	if type(t) == 'table' then
+		http_date.format('rfc1123')
+	end
+end
+
+--{k->true} -> k1,k2,...
+local function klist(t, format)
+	format = format or glue.pass
+	if type(t) == 'table' then
+		local dt = {}
+		for k,v in pairs(t) do
+			if v then
+				dt[#dt+1] = format(k)
+			end
+		end
+		return table.concat(dt, ',')
+	else
+		return format(t) --got them raw
+	end
+end
+
+local function checkupper(s)
+	assert(s == s:upper())
+end
+local function uppercaseklist(t)
+	return klist(t, checkupper)
 end
 
 --{v1,v2,...} -> v1,v2,...
 local function list(t, format)
 	format = format or glue.pass
-	local dt = {}
-	for i,v in ipairs(t) do
-		dt[#dt+1] = format(v)
+	if type(t) == 'table' then
+		local dt = {}
+		for i,v in ipairs(t) do
+			dt[#dt+1] = format(v)
+		end
+		return table.concat(dt, ',')
+	else
+		return format(t) --got them raw
 	end
-	return table.concat(dt, ',')
 end
 
-local function cilist(s)
-	return format_list(s, string.lower)
+local function cilist(t)
+	return list(t, string.lower)
 end
 
 --{k1=v1,...} -> k1=v1,...
-local function kv_list(kvt)
+local function kvlist(kvt)
 	local t = {}
 	for k,v in sorted_pairs(kvt) do
 		if v then
@@ -615,6 +652,7 @@ end
 --{name,k1=v1,...} -> name[; k1=v1 ...]
 local function params(known)
 	return function(s)
+		return s
 	end
 end
 
@@ -624,10 +662,19 @@ end
 
 --{from=,to=,total=,size=} -> bytes <from>-<to>/<total>
 local function response_range(v)
+
 end
 
-
 local function cookies(cookies)
+
+end
+
+local function host(t)
+	if type(t) == 'table' then
+		return t.host .. (t.port and ':' .. t.port or '')
+	else
+		return t
+	end
 end
 
 local nofold_headers = { --headers that it isn't safe to send them folded
@@ -638,8 +685,8 @@ local nofold_headers = { --headers that it isn't safe to send them folded
 
 local formatters = {
 	--general header fields
-	cache_control = kv_list, --no_cache
-	connection = ci,
+	cache_control = kvlist, --no_cache
+	connection = cilist,
 	content_length = int,
 	content_md5 = base64,
 	content_type = params{charset = ci}, --text/html; charset=iso-8859-1
@@ -659,7 +706,7 @@ local formatters = {
 	cookie = kv, --TODO: kv';',
 	expect = cilist, --100-continue
 	from = nil, --user@example.com
-	host = nil,
+	host = host,
 	if_match = nil, --<etag>
 	if_modified_since = date,
 	if_none_match = nil, --etag
@@ -678,9 +725,9 @@ local formatters = {
 	--standard response headers
 	accept_ranges = ci, --"bytes"
 	age = int, --seconds
-	allow = cilist, --method
+	allow = uppercaseklist, --methods
 	content_disposition = params{filename = nil}, --attachment; ...
-	content_encoding = ci,
+	content_encoding = cilist,
 	content_language = cilist,
 	content_location = url,
 	content_range = response_range, --bytes 0-500/1250
@@ -704,8 +751,10 @@ local formatters = {
 }
 
 function headers.format(k, v)
-	local k = k:gsub('-', '_')
-	return formatters[k] and formatters[k](v) or v
+	local k = k:lower()
+	local f = formatters[k:gsub('-', '_')]
+	if f then v = f(v) end
+	return k, tostring(v)
 end
 
 return headers
