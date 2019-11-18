@@ -4,7 +4,6 @@ local headers = require'http_headers'
 local function dump(s)
 	for s in s:gmatch'(.-)\r?\n' do
 		local k, v = s:match'(.-)%s*:(.*)'
-		pp(
 	end
 end
 

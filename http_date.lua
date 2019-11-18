@@ -69,13 +69,15 @@ local function format(t, fmt)
 			t = os.time(t)
 		end
 		local t = os.date('*t', t)
-		return string.format('%s, %02d %s %04d %02d:%02d:%2d GMT',
+		return string.format('%s, %02d %s %04d %02d:%02d:%02d GMT',
 			wdays[t.wday], t.day, t.month, t.year, t.hour, t.min, t.sec)
 	else
 		--TODO: other formats...
 		error'invalid format'
 	end
 end
+
+--self-test
 
 if not ... then
 	require'unit'

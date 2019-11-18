@@ -5,12 +5,8 @@
 local loop = require'socketloop'
 local socket = require'socket'
 local uri = require'uri'
-local http_cookie = require'http_cookie'
 local glue = require'glue'
 local tuple2 = glue.tuples(2)
-
-local fs = require'fs'
-local path = require'path'
 
 local crawler = {
 	socket_timeout = 5,

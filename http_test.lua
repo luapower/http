@@ -58,11 +58,11 @@ end
 
 local function test_client()
 
-	--local host = 'www.websiteoptimization.com'
-	--local uri = '/speed/tweak/compress/'
+	local host = 'www.websiteoptimization.com'
+	local uri = '/speed/tweak/compress/'
 
-	local host = 'ptsv2.com'
-	local uri = '/t/anaf/post'
+	--local host = 'ptsv2.com'
+	--local uri = '/t/anaf/post'
 
 	local sock = socket.tcp()
 	assert(sock:connect(host, 80))
@@ -104,22 +104,25 @@ local function test_server()
 			csock, err = ssock:accept()
 		until csock or err ~= 'timeout'
 		wrap_sock(csock, server)
-		local req = server:read_request('string')
-		print('cbody', csock, req.content)
-		local i = 0
-		local function gen_content()
-			i = i + 1
-			return i == 1 and '123' or i == 2 and '4567890' or nil
+		while true do
+			local req = server:read_request('string')
+			pp(req)
+			print('cbody', csock, req.content)
+			local i = 0
+			local function gen_content()
+				i = i + 1
+				return i == 1 and '123' or i == 2 and '4567890' or nil
+			end
+			server:send_response({
+				content = gen_content,
+				--close = true,
+				http_version = req.http_version,
+				compress = true,
+				content_type = 'text/plain',
+			}, method, req_headers)
 		end
-		server:send_response({
-			content = gen_content,
-			--close = true,
-			http_version = req.http_version,
-			compress = true,
-			content_type = 'text/plain',
-		}, method, req_headers)
 	end
 end
 
---test_client()
-test_server()
+test_client()
+--test_server()

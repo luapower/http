@@ -1,10 +1,8 @@
---luasocket/etc/cookie.lua (converted to tabs)
-local socket = require"socket"
-local http = require"socket.http"
-local url = require"socket.url"
-local ltn12 = require"ltn12"
 
-local token_class =  '[^%c%s%(%)%<%>%@%,%;%:%\\%"%/%[%]%?%=%{%}]'
+--HTTP cookie parsing and formatting (RFC 6265).
+--Originally from LuaSocket.
+
+local token_class = '[^%c%s%(%)%<%>%@%,%;%:%\\%"%/%[%]%?%=%{%}]'
 
 local function unquote(t, quoted)
 	local n = string.match(t, "%$(%d+)$")
@@ -63,7 +61,7 @@ local function quote(s)
 end
 
 local _empty = {}
-local function build_cookies(cookies)
+local function format_set_cookie(cookies)
 	local s = ""
 	for i,v in ipairs(cookies or _empty) do
 		if v.name then
@@ -88,6 +86,6 @@ local function build_cookies(cookies)
 end
 
 return {
-	parse = split_set_cookie,
-	build = build_cookies,
+	parse_set_cookie = split_set_cookie,
+	format_set_cookie = format_set_cookie,
 }

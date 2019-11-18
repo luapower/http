@@ -7,8 +7,10 @@ if not ... then require'http_headers_test'; return end
 local glue = require'glue'
 local b64 = require'libb64'
 local http_date = require'http_date'
+local http_cookie = require'http_cookie'
 local re = require'lpeg.re' --for tokens()
 local uri = require'uri'
+local base64 = b64.decode_string
 
 local headers = {}
 
@@ -41,11 +43,10 @@ local date = http_date.parse
 local url = glue.pass --urls are not parsed (replace with uri.parse if you want them parsed)
 
 local function namesplit(s)
-	local split = glue.gsplit(s,' ?, ?')
+	local name = s:gmatch'[^,]+'
 	return function()
-		local s = split()
-		while s == '' do s = split() end --empty values don't count
-		return s
+		local s = name()
+		return s and glue.trim(s)
 	end
 end
 
@@ -152,6 +153,7 @@ local function opt_nameset(s) return s == true or nameset(s) end
 --individual value parsers per rfc-2616 section 14
 
 local parse = {} --{header_name = parser(s) -> v | nil[,err] }
+headers.parse = parse
 
 local accept_parse = {q = tonumber}
 
@@ -211,7 +213,7 @@ local function credentials(s) --basic base64-string | digest k=v,... per http://
 	if not scheme then return end
 	scheme = name(scheme)
 	if scheme == 'basic' then --basic base64("user:password")
-		local user,pass = b64.decode_string(s):match'^([^:]*):(.*)$'
+		local user,pass = base64(s):match'^([^:]*):(.*)$'
 		return {scheme = scheme, user = user, pass = pass}
 	elseif scheme == 'digest' then
 		local dt = propertylist(s, credentials_parsers)
@@ -294,7 +296,7 @@ parse.content_length = int
 parse.content_location = url
 
 function parse.content_md5(s)
-	return glue.tohex(b64.decode_string(s))
+	return glue.tohex(base64(s))
 end
 
 function parse.content_range(s) --bytes <from>-<to>/<total> -> {from=,to=,total=,size=}
@@ -524,12 +526,10 @@ function parse.refresh(s) --seconds; url=<url> (not standard but supported)
 	return n and {url = url, pause = n}
 end
 
-function parse.set_cookie(s) --TODO
-	return s
-end
+parse.set_cookie = http_cookie.parse_set_cookie
 
-function parse.cookie(s) --TODO
-
+function parse.cookie(s)
+	return kvlist(tokens(s), ';')
 end
 
 function parse.strict_transport_security(s) --http://tools.ietf.org/html/rfc6797
@@ -564,14 +564,14 @@ parse.x_powered_by = glue.pass  --PHP/5.2.1
 
 --parsing API
 
-function headers.parse(k, v)
+function headers.parse_header(k, v)
 	local uk = k:gsub('-', '_')
 	if parse[uk] then return parse[uk](v) end
 	return v --unknown header, return unparsed
 end
 
 --lazy parsing: headers.parsed(t) -> t; t.header_name -> parsed_value
-function headers.parsed(rawheaders)
+function headers.parsed_headers(rawheaders)
 	return setmetatable({}, {__index = function(self, k)
 		local s = rawheaders[k]
 		if s == nil then return nil end
@@ -585,6 +585,7 @@ end
 
 local ci = string.lower
 local base64 = b64.encode_string
+local set_cookie = http_cookie.format_set_cookie
 
 local function int(v)
 	glue.assert(math.floor(v) == v, 'integer expected')
@@ -592,9 +593,7 @@ local function int(v)
 end
 
 local function date(t)
-	if type(t) == 'table' then
-		http_date.format('rfc1123')
-	end
+	return http_date.format(t, 'rfc1123')
 end
 
 --{k->true} -> k1,k2,...
@@ -665,10 +664,6 @@ local function response_range(v)
 
 end
 
-local function cookies(cookies)
-
-end
-
 local function host(t)
 	if type(t) == 'table' then
 		return t.host .. (t.port and ':' .. t.port or '')
@@ -677,13 +672,14 @@ local function host(t)
 	end
 end
 
-local nofold_headers = { --headers that it isn't safe to send them folded
+local nofold_headers = { --headers that it isn't safe to send folded.
 	set_cookie = true,
 	cookie = true,
 	www_authenticate = true,
+	proxy_authenticate = true,
 }
 
-local formatters = {
+local format = {
 	--general header fields
 	cache_control = kvlist, --no_cache
 	connection = cilist,
@@ -703,7 +699,7 @@ local formatters = {
 	accept_encoding = cilist,
 	accept_language = cilist,
 	authorization = ci, --basic <password>
-	cookie = kv, --TODO: kv';',
+	cookie = kvlist,
 	expect = cilist, --100-continue
 	from = nil, --user@example.com
 	host = host,
@@ -741,7 +737,7 @@ local formatters = {
 	refresh = params{url = url}, --seconds; ... (not standard but supported)
 	retry_after = int, --seconds
 	server = nil,
-	set_cookie = cookies,
+	set_cookie = set_cookie,
 	strict_transport_security = nil, --eg. max_age=16070400; includesubdomains
 	vary = headernames,
 	www_authenticate = ci,
@@ -749,10 +745,11 @@ local formatters = {
 	x_Forwarded_proto = ci, --https|http
 	x_powered_by = nil, --PHP/5.2.1
 }
+headers.format = format
 
-function headers.format(k, v)
+function headers.format_header(k, v)
 	local k = k:lower()
-	local f = formatters[k:gsub('-', '_')]
+	local f = format[k:gsub('-', '_')]
 	if f then v = f(v) end
 	return k, tostring(v)
 end

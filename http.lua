@@ -80,13 +80,12 @@ http.status_messages = {
 	[511] = 'Network Authentication Required',
 }
 
---NOTE: method must be in uppercase.
 --NOTE: http_version must be '1.0' or '1.1'
 function http:send_request_line(method, uri, http_version)
+	assert(http_version == '1.1' or http_version == '1.0')
 	assert(method and method == method:upper())
-	self:send(string.format('%s %s HTTP/%s\r\n', method,
-		assert(uri),
-		assert(http_version)))
+	assert(uri)
+	self:send(string.format('%s %s HTTP/%s\r\n', method, uri, http_version))
 end
 
 function http:read_request_line()
@@ -101,7 +100,7 @@ end
 function http:send_status_line(status, message, http_version)
 	message = message or self.status_messages[status] or ''
 	assert(status and status >= 100 and status <= 999, 'invalid status code')
-	assert(http_version)
+	assert(http_version == '1.1' or http_version == '1.0')
 	self:send(string.format('HTTP/%s %d %s\r\n', http_version, status, message))
 end
 
@@ -112,22 +111,35 @@ function http:read_status_line()
 	return http_version, status
 end
 
---NOTE: header names are case-insensitive.
---NOTE: multiple spaces in header values are equivalent to a single space.
---NOTE: spaces around header values are ignored.
---NOTE: header names and values must not contain newlines.
+function http:format_header(k, v)
+	return http_headers.format_header(k, v)
+end
+
+--header names are case-insensitive.
+--multiple spaces in header values are equivalent to a single space.
+--spaces around header values are ignored.
+--header names and values must not contain newlines.
+--passing a table as value will generate duplicate headers for each value
+--  (set-cookie will come like that because it's not safe to send it folded).
 function http:send_headers(headers)
 	local names, values = {}, {}
 	local i = 1
 	for k, v in pairs(headers) do
-		k, v = http_headers.format(k, v)
+		k, v = self:format_header(k, v)
 		names [i] = k
 		values[k] = v
 		i = i + 1
 	end
 	table.sort(names) --to ease debugging.
 	for _,name in ipairs(names) do
-		self:send(string.format('%s: %s\r\n', name, values[name]))
+		local v = values[name]
+		if type(v) == 'table' then --must be sent unfolded.
+			for i,v in ipairs(v) do
+				self:send(string.format('%s: %s\r\n', name, v))
+			end
+		else
+			self:send(string.format('%s: %s\r\n', name, v))
+		end
 	end
 	self:send'\r\n'
 end
@@ -138,15 +150,15 @@ function http:read_headers(rawheaders)
 	while line ~= '' do --headers end up with a blank line
 		name, value = line:match'^([^:]+):%s*(.*)'
 		assert(name, 'invalid header')
-		name = name:lower()
+		name = name:lower() --header names are case-insensitive
 		line = self:read_line()
 		while line:find'^%s' do --unfold any folded values
 			value = value .. line
 			line = self:read_line()
 		end
-		value = value:gsub('%s+', ' ') --LWS -> one SP
-		value = value:gsub('%s*$', '') --right trim
-		if rawheaders[name] then --headers can be duplicate
+		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
+		value = value:gsub('%s*$', '') --around-spaces are meaningless.
+		if rawheaders[name] then --headers can be duplicate.
 			rawheaders[name] = rawheaders[name] .. ',' .. value
 		else
 			rawheaders[name] = value
@@ -188,16 +200,7 @@ function http:zlib_decoder(format, write)
 	return decode
 end
 
-function http:zlib_encoder(format, write)
-	assert(self.zlib, 'zlib not loaded')
-	local decode = coroutine.wrap(function()
-		self.zlib.inflate(coroutine.yield, write, nil, format)
-	end)
-	decode()
-	return decode
-end
-
-function http:chain_writer(write, encodings)
+function http:chained_decoder(write, encodings)
 	if encodings then
 		for i = #encodings, 1, -1 do
 			local encoding = encodings[i]
@@ -214,6 +217,7 @@ function http:chain_writer(write, encodings)
 end
 
 function http:zlib_encoder(format, content, content_size)
+	assert(self.zlib, 'zlib not loaded')
 	if type(content) == 'string' then
 		return zlib.deflate(content, '', nil, format)
 	elseif type(content) == 'cdata' then
@@ -226,18 +230,11 @@ function http:zlib_encoder(format, content, content_size)
 end
 
 function http:send_body(content, content_size, encoding, chunked)
-	if not content then
-		return
-	end
-
 	if encoding == 'gzip' or encoding == 'deflate' then
-		assert(self.zlib, 'zlib not loaded')
-		content, content_size =
-			self:zlib_encoder(encoding, content, content_size)
+		content, content_size = self:zlib_encoder(encoding, content, content_size)
 	elseif encoding ~= 'identity' then
 		assert(false, 'invalid encoding')
 	end
-
 	if chunked then
 		self:send_chunked(content)
 	elseif type(content) == 'function' then
@@ -264,7 +261,7 @@ function http:read_body_to_writer(headers, write, from_server, close_connection)
 	if not write then
 		write = null_writer
 	end
-	write = self:chain_writer(write, headers['content-encoding'])
+	write = self:chained_decoder(write, headers['content-encoding'])
 	local te = headers['transfer-encoding']
 	if te and te.chunked then
 		self:read_chunks(write)
@@ -341,8 +338,14 @@ function http:send_request(t)
 	self:send_headers(headers)
 	local content_encoding = self.zlib and t.compress == true and 'gzip'
 		or t.compress or 'identity'
-	self:send_body(t.content, t.content_size, content_encoding, chunked)
+	if t.content then
+		self:send_body(t.content, t.content_size, content_encoding, chunked)
+	end
 	return close
+end
+
+function http:parsed_headers(rawheaders)
+	return http_headers.parsed_headers(rawheaders)
 end
 
 function http:read_response(method, write_content, close)
@@ -353,7 +356,7 @@ function http:read_response(method, write_content, close)
 		http_version, status = self:read_status_line()
 	end
 	self:read_headers(rawheaders)
-	local headers = http_headers.parsed(rawheaders)
+	local headers = self:parsed_headers(rawheaders)
 	close = close or headers['connection'].close or http_version == '1.0'
 	if not self:should_have_response_body(method, status) then
 		write_content = nil --ignore it
@@ -374,7 +377,7 @@ function http:read_request(write_content)
 	local http_version, method, uri = self:read_request_line()
 	local rawheaders = {}
 	self:read_headers(rawheaders)
-	local headers = http_headers.parsed(rawheaders)
+	local headers = self:parsed_headers(rawheaders)
 	local content = self:read_body(headers, write_content)
 	self.request = {
 		http_version = http_version,
@@ -387,7 +390,7 @@ function http:read_request(write_content)
 	return self.request
 end
 
-local zlib_encodings    = {gzip = true, deflate = true}
+local zlib_encodings = {gzip = true, deflate = true}
 local default_encodings = {}
 
 function http:negotiate_content_encoding(compress)
@@ -475,16 +478,6 @@ function http:send_response(t)
 		status = 405 --method not allowed
 	end
 
-	local content_encoding
-	if not status then
-		content_encoding = self:negotiate_content_encoding(t.compress)
-		if not content_encoding then
-			status = 406 --not acceptable
-		elseif content_encoding ~= 'identity' then
-			headers['content-encoding'] = content_encoding
-		end
-	end
-
 	local content_type
 	if not status then
 		content_type = self:negotiate_content_type(
@@ -496,6 +489,16 @@ function http:send_response(t)
 		end
 	end
 
+	local content_encoding
+	if not status then
+		content_encoding = self:negotiate_content_encoding(t.compress)
+		if not content_encoding then
+			status = 406 --not acceptable
+		elseif content_encoding ~= 'identity' then
+			headers['content-encoding'] = content_encoding
+		end
+	end
+
 	local chunked
 	if not status then
 		headers['date'] = os.time()
@@ -504,14 +507,17 @@ function http:send_response(t)
 		self:override_headers(headers, t.headers)
 	end
 
-	local status_changed = status
+	local content = t.content
+	if status then
+		content = nil
+	end
 	status_message = not status and t.status_message or nil
 	status = status or t.status or 200
 
 	self:send_status_line(status, status_message, http_version)
 	self:send_headers(headers)
-	if not status_changed then
-		self:send_body(t.content, t.content_size, content_encoding, chunked)
+	if content then
+		self:send_body(content, t.content_size, content_encoding, chunked)
 	end
 
 	if close then
