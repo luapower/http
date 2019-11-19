@@ -13,26 +13,18 @@ local function wrap_sock(sock, http)
 	sock:settimeout(0)
 
 	function http:read(buf, sz)
-		local s, err, p
-		while true do
-			s, err, p = sock:receive(sz)
-			if not s and not p then
+		local s = ''
+		while s == '' do
+			local s1, err, p = sock:receive(sz)
+			if err ~= 'timeout' then
 				return nil, err
 			end
-			if not (err == 'timeout' and #p == 0) then
-				break
-			end
+			s = s .. (s1 or p)
 		end
-		local n = (s and #s or 0) + (p and #p or 0)
-		assert(n <= sz)
-		if s then
-			ffi.copy(buf, s, #s)
-		elseif p then
-			ffi.copy(buf, p, #p)
-		end
-		local s = ffi.string(buf, sz)
+		assert(#s <= sz)
+		ffi.copy(buf, s, #s)
 		print('recv', sock, P(s))
-		return n
+		return #s
 	end
 
 	function http:send(buf, sz)
@@ -71,7 +63,7 @@ local function test_client()
 
 	local write_body, flush_body = wrap_sock(sock, client)
 
-	pp(client:perform_request({
+	pp(client:try('perform_request', {
 		uri = uri,
 		host = host,
 		headers = {
@@ -113,16 +105,15 @@ local function test_server()
 				i = i + 1
 				return i == 1 and '123' or i == 2 and '4567890' or nil
 			end
-			server:send_response({
+			server:send_response(req, {
 				content = gen_content,
 				--close = true,
-				http_version = req.http_version,
 				compress = true,
 				content_type = 'text/plain',
-			}, method, req_headers)
+			})
 		end
 	end
 end
 
-test_client()
---test_server()
+--test_client()
+test_server()

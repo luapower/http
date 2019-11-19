@@ -575,7 +575,7 @@ function headers.parsed_headers(rawheaders)
 	return setmetatable({}, {__index = function(self, k)
 		local s = rawheaders[k]
 		if s == nil then return nil end
-		local v = headers.parse(k, s)
+		local v = headers.parse_header(k, s)
 		rawset(self, k, v)
 		return v
 	end})

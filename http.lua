@@ -11,6 +11,85 @@ local ffi = require'ffi'
 
 local http = {}
 
+--error handling -------------------------------------------------------------
+
+--raise protocol errors with check() instead of assert() or error() which
+--makes functions wrapped with http:protect() return nil,err for those errors.
+
+local protocol_error = {}
+
+local function check(ok, err)
+	return assert(ok, setmetatable({message = err}, protocol_error))
+end
+http.check = check
+
+local function catch(err)
+	if getmetatable(err) ~= protocol_error then
+		return debug.traceback(err)
+	else
+		return err
+	end
+end
+local function pass(self, ok, ...)
+	if ok then return ... end
+	self:close()
+	local err = ...
+	if getmetatable(err) == protocol_error then
+		return nil, err.message
+	else
+		error(err, 2)
+	end
+end
+function http:protect(method)
+	local f = self[method]
+	self[method] = function(self, ...)
+		return pass(self, xpcall(f, catch, self, ...))
+	end
+end
+
+--low-level API to implement -------------------------------------------------
+
+function http:close()           error'not implemented' end
+function http:read (buf, maxsz) error'not implemented' end
+function http:send (buf, sz)    error'not implemented' end
+
+--linebuffer-based read API --------------------------------------------------
+
+function http:read_exactly(n, write)
+	local read = self.linebuffer.read
+	while n > 0 do
+		local buf, sz = read(n)
+		check(buf, sz)
+		write(buf, sz)
+		n = n - sz
+	end
+end
+
+function http:read_line()
+	return check(self.linebuffer.readline())
+end
+
+function http:read_until_closed(write_content)
+	local read = self.linebuffer.read
+	while true do
+		local buf, sz = read(1/0)
+		if not buf then
+			if sz == 'closed' then return end
+			check(nil, sz)
+		end
+		write_content(buf, sz)
+	end
+end
+
+function http:create_linebuffer()
+	local function read(buf, sz)
+		return self:read(buf, sz)
+	end
+	self.linebuffer = stream.linebuffer(read, '\r\n', 8192)
+end
+
+--request line & status line -------------------------------------------------
+
 --https://www.iana.org/assignments/http-status-codes/http-status-codes.txt
 http.status_messages = {
 	[100] = 'Continue',
@@ -86,12 +165,13 @@ function http:send_request_line(method, uri, http_version)
 	assert(method and method == method:upper())
 	assert(uri)
 	self:send(string.format('%s %s HTTP/%s\r\n', method, uri, http_version))
+	return true
 end
 
 function http:read_request_line()
 	local method, uri, http_version =
 		self:read_line():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
-	assert(method, 'invalid request line')
+	check(method, 'invalid request line')
 	return http_version, method, uri
 end
 
@@ -107,13 +187,22 @@ end
 function http:read_status_line()
 	local http_version, status = self:read_line():match'^HTTP/(%d+%.%d+)%s+(%d%d%d)'
 	status = tonumber(status)
-	assert(http_version and status, 'invalid status line')
+	check(http_version and status, 'invalid status line')
 	return http_version, status
 end
+
+--headers --------------------------------------------------------------------
 
 function http:format_header(k, v)
 	return http_headers.format_header(k, v)
 end
+
+function http:parsed_headers(rawheaders)
+	return http_headers.parsed_headers(rawheaders)
+end
+
+--special value to have a header removed because `false` might be a valid value.
+http.remove = {}
 
 --header names are case-insensitive.
 --multiple spaces in header values are equivalent to a single space.
@@ -123,22 +212,16 @@ end
 --  (set-cookie will come like that because it's not safe to send it folded).
 function http:send_headers(headers)
 	local names, values = {}, {}
-	local i = 1
-	for k, v in pairs(headers) do
-		k, v = self:format_header(k, v)
-		names [i] = k
-		values[k] = v
-		i = i + 1
-	end
-	table.sort(names) --to ease debugging.
-	for _,name in ipairs(names) do
-		local v = values[name]
-		if type(v) == 'table' then --must be sent unfolded.
-			for i,v in ipairs(v) do
+	for k, v in glue.sortedpairs(headers) do
+		if v ~= http.remove then
+			k, v = self:format_header(k, v)
+			if type(v) == 'table' then --must be sent unfolded.
+				for i,v in ipairs(v) do
+					self:send(string.format('%s: %s\r\n', name, v))
+				end
+			else
 				self:send(string.format('%s: %s\r\n', name, v))
 			end
-		else
-			self:send(string.format('%s: %s\r\n', name, v))
 		end
 	end
 	self:send'\r\n'
@@ -149,7 +232,7 @@ function http:read_headers(rawheaders)
 	line = self:read_line()
 	while line ~= '' do --headers end up with a blank line
 		name, value = line:match'^([^:]+):%s*(.*)'
-		assert(name, 'invalid header')
+		check(name, 'invalid header')
 		name = name:lower() --header names are case-insensitive
 		line = self:read_line()
 		while line:find'^%s' do --unfold any folded values
@@ -166,11 +249,28 @@ function http:read_headers(rawheaders)
 	end
 end
 
+--body -----------------------------------------------------------------------
+
+function http:set_body_headers(headers, content, content_size, close)
+	if type(content) == 'string' then
+		assert(not content_size, 'content_size ignored')
+		headers['content-length'] = #content
+	elseif type(content) == 'cdata' then
+		headers['content-length'] = assert(content_size, 'content_size missing')
+	elseif type(content) == 'function' then
+		if content_size then
+			headers['content-length'] = content_size
+		elseif not close then
+			headers['transfer-encoding'] = 'chunked'
+		end
+	end
+end
+
 function http:read_chunks(write_content)
 	while true do
 		local line = self:read_line()
 		local size = tonumber(string.gsub(line, ';.*', ''), 16) --size[; extension]
-		assert(size, 'invalid chunk size')
+		check(size, 'invalid chunk size')
 		if size == 0 then break end --last chunk (trailers not supported)
 		self:read_exactly(size, write_content)
 		self:read_line()
@@ -229,30 +329,29 @@ function http:zlib_encoder(format, content, content_size)
 	end
 end
 
-function http:send_body(content, content_size, encoding, chunked)
-	if encoding == 'gzip' or encoding == 'deflate' then
-		content, content_size = self:zlib_encoder(encoding, content, content_size)
-	elseif encoding ~= 'identity' then
-		assert(false, 'invalid encoding')
+function http:send_body(content, content_size, content_encoding, transfer_encoding)
+	if not content then
+		return
 	end
-	if chunked then
+	if content_encoding == 'gzip' or content_encoding == 'deflate' then
+		content, content_size = self:zlib_encoder(content_encoding, content, content_size)
+	elseif content_encoding then
+		assert(false, 'invalid content-encoding')
+	end
+	if transfer_encoding == 'chunked' then
 		self:send_chunked(content)
-	elseif type(content) == 'function' then
-		while true do
-			local chunk, len = content()
-			if not chunk then break end
-			self:send(chunk, len)
-		end
 	else
-		self:send(content, content_size)
+		assert(not transfer_encoding, 'invalid transfer-encoding')
+		if type(content) == 'function' then
+			while true do
+				local chunk, len = content()
+				if not chunk then break end
+				self:send(chunk, len)
+			end
+		else
+			self:send(content, content_size)
+		end
 	end
-end
-
-function http:should_have_response_body(method, status)
-	if method == 'HEAD' then return nil end
-	if status == 204 or status == 304 then return nil end
-	if status >= 100 and status < 200 then return nil end
-	return true
 end
 
 local function null_writer() end
@@ -287,129 +386,154 @@ function http:read_body(headers, write, ...)
 	end
 end
 
-function http:should_redirect(method, status, response_headers, nredirects)
-	return response_headers['location']
-		and response_headers['location']:gsub('%s', '') ~= ''
-		and (status == 301 or status == 302 or status == 303 or status == 307)
-		and (method == 'GET' or method == 'HEAD')
-		and (not nredirects or nredirects < 20)
-end
+--client-side ----------------------------------------------------------------
 
-function http:set_content_headers(headers, content, content_size, close_connection)
-	if type(content) == 'string' then
-		assert(not content_size, 'content_size ignored')
-		headers['content-length'] = #content
-	elseif type(content) == 'cdata' then
-		headers['content-length'] = assert(content_size, 'content_size missing')
-	elseif type(content) == 'function' then
-		if content_size then
-			headers['content-length'] = content_size
-		elseif not close_connection then
-			headers['transfer-encoding'] = 'chunked'
-			return true
-		end
-	end
-end
-
-function http:override_headers(headers, user_headers)
-	if user_headers then
-		for k,v in pairs(user_headers) do
-			headers[k] = v
-		end
-	end
-end
-
-function http:send_request(t)
-	local http_version = t.http_version or '1.1'
-	local headers = {}
+function http:make_request(t)
+	local req = {}
+	req.http_version = t.http_version or '1.1'
+	req.method = t.method or 'GET'
+	req.uri = t.uri or '/'
+	req.headers = {}
 	assert(t.host, 'host missing') --the only required field, even for HTTP/1.0.
-	headers['host'] = {host = t.host, port = t.port}
-	local close = t.close or http_version == '1.0'
-	if close then
-		headers['connection'] = 'close'
+	req.headers['host'] = {host = t.host, port = t.port}
+	req.close = t.close or req.http_version == '1.0'
+	if req.close then
+		req.headers['connection'] = 'close'
 	end
 	if self.zlib then
-		headers['accept-encoding'] = 'gzip, deflate'
+		req.headers['accept-encoding'] = 'gzip, deflate'
 	end
-	local chunked = self:set_content_headers(
-		headers, t.content, t.content_size, close)
-	self:override_headers(headers, t.headers)
-	self:send_request_line(t.method, t.uri, http_version)
-	self:send_headers(headers)
-	local content_encoding = self.zlib and t.compress == true and 'gzip'
-		or t.compress or 'identity'
-	if t.content then
-		self:send_body(t.content, t.content_size, content_encoding, chunked)
+	req.content = t.content
+	req.content_size = t.content_size
+	if self.zlib and t.compress == true then
+		req.headers['content-encoding'] = 'gzip'
 	end
-	return close
+	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
+	glue.update(req.headers, t.headers)
+	req.redirect_count = 0
+	req.receive_content = t.receive_content
+	return req
 end
 
-function http:parsed_headers(rawheaders)
-	return http_headers.parsed_headers(rawheaders)
+function http:send_request(req)
+	self:send_request_line(req.method, req.uri, req.http_version)
+	self:send_headers(req.headers)
+	self:send_body(req.content, req.content_size,
+		req.headers['content-encoding'],
+		req.headers['transfer-encoding'])
 end
 
-function http:read_response(method, write_content, close)
-	local http_version, status = self:read_status_line()
-	local rawheaders = {}
-	while status == 100 do --ignore any 100-continue messages
-		self:read_headers(rawheaders)
-		http_version, status = self:read_status_line()
+function http:should_have_response_body(method, status)
+	if method == 'HEAD' then return nil end
+	if status == 204 or status == 304 then return nil end
+	if status >= 100 and status < 200 then return nil end
+	return true
+end
+
+function http:should_redirect(req, res)
+	local method, status = req.method, res.status
+	return res.headers['location']
+		and (status == 301 or status == 302 or status == 303 or status == 307)
+		and (method == 'GET' or method == 'HEAD')
+end
+
+function http:read_response(req)
+	local res = {}
+	res.rawheaders = {}
+
+	res.http_version, res.status = self:read_status_line()
+
+	while res.status == 100 do --ignore any 100-continue messages
+		self:read_headers(res.rawheaders)
+		res.http_version, res.status = self:read_status_line()
 	end
-	self:read_headers(rawheaders)
-	local headers = self:parsed_headers(rawheaders)
-	close = close or headers['connection'].close or http_version == '1.0'
-	if not self:should_have_response_body(method, status) then
-		write_content = nil --ignore it
+
+	self:read_headers(res.rawheaders)
+	res.headers = self:parsed_headers(res.rawheaders)
+
+	res.close = req.close
+		or res.headers['connection'].close
+		or res.http_version == '1.0'
+
+	local receive_content = req.receive_content
+	if self:should_redirect(req, res) then
+		receive_content = nil --ignore the body
+		res.redirect_location = check(res.headers['location'], 'no location')
+		res.receive_content = req.receive_content
 	end
-	local content = self:read_body(headers, write_content, true, close)
-	if close then
+
+	if not self:should_have_response_body(req.method, res.status) then
+		receive_content = nil --ignore the body
+	end
+
+	res.content, res.content_size =
+		self:read_body(res.headers, receive_content, true, res.close)
+
+	if res.close then
 		self:close()
 	end
-	return http_version, status, headers, content, close, rawheaders
+
+	return res
 end
 
-function http:perform_request(t, write_content)
-	local close = self:send_request(t)
-	return self:read_response(t.method, write_content, close)
+function http:redirect(req, res)
+	check(req.redirect_count < 20, 'too many redirects')
+	req.uri = assert(res.redirect_location, 'no location')
+	http:send_request(req)
+	local res = http:read_response(req)
+	req.redirect_count = req.redirect_count + 1
+	return res
 end
 
-function http:read_request(write_content)
-	local http_version, method, uri = self:read_request_line()
-	local rawheaders = {}
-	self:read_headers(rawheaders)
-	local headers = self:parsed_headers(rawheaders)
-	local content = self:read_body(headers, write_content)
-	self.request = {
-		http_version = http_version,
-		method = method,
-		uri = uri,
-		headers = headers,
-		content = content,
-		rawheaders = rawheaders,
-	}
-	return self.request
+function http:perform_request(t)
+	local req = self:make_request(t)
+	self:send_request(req)
+	local res = self:read_response(req)
+	while res.redirect_location do
+		res = self:redirect(req, res)
+	end
+	return res, req
+end
+http:protect'perform_request'
+
+--server side ----------------------------------------------------------------
+
+function http:read_request(receive_content)
+	local req = {}
+	req.http_version, req.method, req.uri = self:read_request_line()
+	req.rawheaders = {}
+	self:read_headers(req.rawheaders)
+	req.headers = self:parsed_headers(req.rawheaders)
+	req.content, req.content_size = self:read_body(req.headers, receive_content)
+	return req
+end
+http:protect'read_request'
+
+function http:no_body(res, status)
+	res.status = status
+	res.content, res.content_size = ''
+	return false
 end
 
 local zlib_encodings = {gzip = true, deflate = true}
 local default_encodings = {}
 
-function http:negotiate_content_encoding(compress)
-	local accept = self.request.headers['accept-encoding']
+function http:negotiate_content_encoding(req, compress)
+	local accept = req.headers['accept-encoding']
 	if not accept then
 		return 'identity'
 	end
-
 	local available = compress and self.zlib
 		and zlib_encodings or default_encodings
 
 	local function cmp_qs(enc1, enc2)
-		return
-			(accept[enc1].q or 1) <
-			(accept[enc2].q or 1)
+		local q1 = accept[enc1].q or 1
+		local q2 = accept[enc2].q or 1
+		return q1 < q2
 	end
 	local allow_identity = true
 	for encoding, params in glue.sortedpairs(accept, cmp_qs) do
-		local q = params.q or 1
+		local q = type(params) == 'table' and params.q or 1
 		if q > 0 then
 			if available[encoding] then
 				return encoding
@@ -421,18 +545,41 @@ function http:negotiate_content_encoding(compress)
 	return allow_identity and 'identity' or nil
 end
 
-function http:negotiate_content_type(default, available)
-	local accept = self.request.headers['accept']
+function http:accept_content_encoding(req, res, compress)
+	local content_encoding = self:negotiate_content_encoding(req, compress)
+	if not content_encoding then
+		return self:no_body(res, 406) --not acceptable
+	elseif content_encoding ~= 'identity' then
+		res.headers['content-encoding'] = content_encoding
+		return true
+	end
+end
+
+function http:allow_method(req, res, allowed_methods)
+	if not allowed_methods[req.method] then
+		res.headers['allow'] = allowed_methods
+		return self:no_body(res, 405) --method not allowed
+	else
+		return true
+	end
+end
+
+function http:negotiate_content_type(req, available)
+	local accept = req.headers['accept']
 	if not accept then
-		return default
+		return available[1]
 	end
 	local function cmp_qs(mt1, mt2)
 		return accept[mt1] < accept[mt2]
 	end
+	local avail = glue.index(available)
 	local function cmp_qs(enc1, enc2)
-		return
-			(accept[enc1].q or 1) <
-			(accept[enc2].q or 1)
+		local q1 = accept[enc1].q or 1
+		local q2 = accept[enc2].q or 1
+		if q1 < q2 then return true end
+		local i1 = avail[enc1]
+		local i2 = avail[enc2]
+		return i1 < i2
 	end
 	local function accepts(wildcard, mediatype)
 		if type(mediatype) == 'table' then
@@ -450,124 +597,83 @@ function http:negotiate_content_type(default, available)
 		end
 	end
 	for wildcard, params in glue.sortedpairs(accept, cmp_qs) do
-		if (params.q or 1) > 0 then
-			if accepts(wildcard, default) then
-				return default
-			elseif available and accepts(wildcard, available) then
-				return default
-			end
+		local q = type(params) == 'table' and params.q or 1
+		if q > 0 then
+			return accepts(wildcard, available)
 		end
+	end
+	return false
+end
+
+function http:accept_content_type(req, res, available)
+	local content_type = self:negotiate_content_type(req, available)
+	if not content_type then
+		return self:no_body(res, 406) --not acceptable
+	else
+		res.headers['content-type'] = content_type
+		return true
 	end
 end
 
-function http:send_response(t)
-	assert(self.request, 'request not read')
+function http:send_response(req, t)
+	local res = {}
+	res.headers = {}
 
-	local headers = {}
+	res.http_version = t.http_version or req.http_version
 
-	local http_version = t.http_version or self.request.http_version
-	local status, status_message
-
-	local close = t.close or self.request.headers['connection'].close
-	if close then
-		headers['connection'] = 'close'
+	res.close = t.close or req.headers['connection'].close
+	if res.close then
+		res.headers['connection'] = 'close'
 	end
 
-	if t.allowed_methods and not t.allowed_methods[self.request.method] then
-		headers['allow'] = t.allowed_methods
-		status = 405 --method not allowed
+	if t.status then
+		res.status = t.status
+		res.status_message = t.status_message
+	else
+		res.status = 200
 	end
 
-	local content_type
-	if not status then
-		content_type = self:negotiate_content_type(
-			t.content_type, t.content_types)
-		if not content_type then
-			status = 406 --not acceptable
-		else
-			headers['content-type'] = content_type
+	if t.allowed_methods and not self:allow_method(req, res, t.allowed_methods) then
+		return false
+	end
+	if not self:accept_content_encoding(req, res, t.compress) then
+		return false
+	end
+	if t.content_type or t.content_types then
+		local content_types = t.content_types or {t.content_type}
+		if not self:accept_content_type(req, res, content_types) then
+			return false
 		end
 	end
 
-	local content_encoding
-	if not status then
-		content_encoding = self:negotiate_content_encoding(t.compress)
-		if not content_encoding then
-			status = 406 --not acceptable
-		elseif content_encoding ~= 'identity' then
-			headers['content-encoding'] = content_encoding
-		end
-	end
+	res.headers['date'] = os.time()
 
-	local chunked
-	if not status then
-		headers['date'] = os.time()
-		chunked = self:set_content_headers(
-			headers, t.content, t.content_size, close)
-		self:override_headers(headers, t.headers)
-	end
+	res.content = t.content
+	res.content_size = t.content_size
+	self:set_body_headers(res.headers, res.content, res.content_size, res.close)
+	glue.update(res.headers, t.headers)
 
-	local content = t.content
-	if status then
-		content = nil
-	end
-	status_message = not status and t.status_message or nil
-	status = status or t.status or 200
+	self:send_status_line(res.status, res.status_message, res.http_version)
+	self:send_headers(res.headers)
+	self:send_body(res.content, res.content_size,
+		res.headers['content-encoding'],
+		res.headers['transfer-encoding'])
 
-	self:send_status_line(status, status_message, http_version)
-	self:send_headers(headers)
-	if content then
-		self:send_body(content, t.content_size, content_encoding, chunked)
-	end
-
-	if close then
+	if res.close then
 		self:close()
 	end
 
-	self.request = nil
 	return status
 end
+http:protect'send_response'
 
---low-level API to implement
-
-function http:close()           error'not implemented' end
-function http:read (buf, maxsz) error'not implemented' end
-function http:send (buf, sz)    error'not implemented' end
-
---linebuffer-based read API
-
-function http:read_exactly(n, write)
-	local read = self.linebuffer.read
-	while n > 0 do
-		local buf, sz = read(n)
-		assert(buf, 'short read')
-		write(buf, sz)
-		n = n - sz
-	end
-end
-
-function http:read_line()
-	return assert(self.linebuffer.readline())
-end
-
-function http:read_until_closed(write_content)
-	local read = self.linebuffer.read
-	while true do
-		local buf, sz = read(1/0)
-		if not buf and sz == 'closed' then return end
-		assert(buf, sz)
-		write_content(buf, sz)
-	end
-end
-
---instantiation
+--instantiation --------------------------------------------------------------
 
 function http:new(t)
-	local self = setmetatable(t or {}, {__index = self})
-	local function read(buf, sz)
-		return self:read(buf, sz)
-	end
-	self.linebuffer = stream.linebuffer(read, '\r\n', 8192)
+	local self, super = t or {}, self
+	self.__index = super
+	setmetatable(self, self)
+	self:create_linebuffer()
 	return self
 end
 
