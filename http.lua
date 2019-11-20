@@ -410,7 +410,6 @@ function http:make_request(t)
 	end
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
 	glue.update(req.headers, t.headers)
-	req.redirect_count = 0
 	req.receive_content = t.receive_content
 	return req
 end
@@ -476,22 +475,10 @@ function http:read_response(req)
 	return res
 end
 
-function http:redirect(req, res)
-	check(req.redirect_count < 20, 'too many redirects')
-	req.uri = assert(res.redirect_location, 'no location')
-	http:send_request(req)
-	local res = http:read_response(req)
-	req.redirect_count = req.redirect_count + 1
-	return res
-end
-
 function http:perform_request(t)
 	local req = self:make_request(t)
 	self:send_request(req)
 	local res = self:read_response(req)
-	while res.redirect_location do
-		res = self:redirect(req, res)
-	end
 	return res, req
 end
 http:protect'perform_request'
@@ -666,6 +653,65 @@ function http:send_response(req, t)
 	return status
 end
 http:protect'send_response'
+
+--luasocket binding ----------------------------------------------------------
+
+local P = require'pp'.format
+local S = function(s) return tostring(s):sub(-6) end
+
+function http:bind_luasocket(sock)
+
+	sock:settimeout(0)
+
+	function self:read(buf, sz)
+		local s = ''
+		while s == '' do
+			local s1, err, p = sock:receive(sz)
+			if s1 or p then
+				s = s .. (s1 or p)
+			elseif err ~= 'timeout' then
+				return nil, err
+			end
+		end
+		assert(#s <= sz)
+		ffi.copy(buf, s, #s)
+		print('recv', S(sock), P(s))
+		return #s
+	end
+
+	function self:send(buf, sz)
+		sz = sz or #buf
+		local s = ffi.string(buf, sz)
+		print('send', S(sock), P(s))
+		return sock:send(s)
+	end
+
+	function self:close()
+		sock:close()
+		print('closed', sock)
+	end
+end
+
+--luasec binding -------------------------------------------------------------
+
+function http:wrap_luasec(sock, host)
+	local ssl = require'ssl'
+	local ssock = ssl.wrap(sock:getsocket(), {
+		protocol = 'any',
+		options  = {'all', 'no_sslv2', 'no_sslv3', 'no_tlsv1'},
+		verify   = 'none',
+		mode     = 'client',
+	})
+	ssock:sni(host)
+	assert(ssock:settimeout(0, 'b'))
+	assert(ssock:settimeout(0, 't'))
+	sock:setsocket(ssock)
+	local ok, err = sock:call_async(ssock.dohandshake, ssock)
+	if not ok then
+		h:close()
+		return nil, err
+	end
+end
 
 --instantiation --------------------------------------------------------------
 

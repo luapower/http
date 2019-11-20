@@ -4,47 +4,37 @@
 
 local loop = require'socketloop'
 local socket = require'socket'
+local http = require'http'
 local uri = require'uri'
 local glue = require'glue'
 local tuple2 = glue.tuples(2)
 
-local crawler = {
+local client = {
 	socket_timeout = 5,
 	source_ips = {},
 	print_urls = false,
 	print_redirects = false,
-	cache_pages = false,
-	read_cache_pages = false,
 	maxretries = 0,
 	user_agent = 'Mozilla/5.0 (Windows NT 5.1)',
+	max_redirect_count = 20,
 }
 
-function crawler:new(opt)
-
-	local self = glue.update({
-		cache_dir = fs.exedir()..'/tmp',
-	}, self, opt)
-
-	http.USERAGENT = self.user_agent
-
-	--source ip allocation ----------------------------------------------------
-
-	--allocate source ips in a round-robin per destination host.
-
-	local last_source_ip = {} --{host = index in source_ips}
-
-	local function get_source_ip(host)
-		local i = (last_source_ip[host] or 0) + 1
-		if i > #self.source_ips then i = 1 end
-		last_source_ip[host] = i
-		return self.source_ips[i]
+--return a function that cycles source ips per destination host.
+--good for crawling when the server has per-client-ip throttling.
+function client:source_ip_roller(source_ips)
+	if not source_ips then
+		return glue.noop
 	end
+	local last_source_ip = {} --{host = index in source_ips}
+	return function(self, host)
+		local i = (last_source_ip[host] or 0) + 1
+		if i > #source_ips then i = 1 end
+		last_source_ip[host] = i
+		return source_ips[i]
+	end
+end
 
-	--persistent connections --------------------------------------------------
-
-	--override http.open to reuse http connections made on the same (host, port).
-	--also, connections are wrapped in socketloop connections and a source ip
-	--is allocated and bound to each new connection.
+function client:connection_pool()
 
 	local cct = {total = 0, now = 0, idle = 0}
 	local function cc(k, n)
@@ -56,22 +46,23 @@ function crawler:new(opt)
 	end
 
 	local conns = {} --{(host, port) = {conn1, ...}}
+	local pool = {}
 
-	local function push_conn(host, port, h)
-		local k = tuple2(host, port)
-		conns[k] = conns[k] or {}
-		table.insert(conns[k], h)
-		cc('idle', 1)
-	end
-
-	local function pull_conn(host, port)
+	function pool:pull_conn(host, port)
 		local k = tuple2(host, port)
 		local h = conns[k] and table.remove(conns[k], 1) --FIFO order
 		cc('idle', h and -1 or 0)
 		return h
 	end
 
-	local function remove_conn(host, port, h)
+	function pool:push_conn(host, port, h)
+		local k = tuple2(host, port)
+		conns[k] = conns[k] or {}
+		table.insert(conns[k], h)
+		cc('idle', 1)
+	end
+
+	function pool:remove_conn(host, port, h)
 		local k = tuple2(host, port)
 		local t = conns[k]
 		if not t then return end
@@ -84,7 +75,7 @@ function crawler:new(opt)
 		end
 	end
 
-	function close_connections()
+	function pool:close_connections()
 		for _,t in pairs(conns) do
 			for i=#t,1,-1 do
 				local h = t[i]
@@ -93,94 +84,10 @@ function crawler:new(opt)
 		end
 	end
 
-	local http_open = http.open
-	local store_cookies, stored_cookies --fw. decl.
+	return pool
+end
 
-	function http.open(host, port)
-		local h = pull_conn(host, port)
-		if h then return h end
-
-		local source_ip = get_source_ip(host)
-		local function create()
-			local c = socket.try(socket.tcp())
-			if source_ip then
-				assert(c:bind(source_ip, 0))
-			end
-			return loop.wrap(c)
-		end
-		local h = http_open(host, port, create)
-		h.c:settimeout(0) --because http.open resets it
-		if port == 443 then
-			local ssl = require'ssl'
-			local skt = ssl.wrap(h.c:getsocket(), {
-				protocol = 'any',
-				options  = {'all', 'no_sslv2', 'no_sslv3', 'no_tlsv1'},
-				verify   = 'none',
-				mode     = 'client',
-			})
-			h.c:setsocket(skt)
-			skt:sni(host)
-			assert(skt:settimeout(0, 'b'))
-			assert(skt:settimeout(0, 't'))
-			local ok, err = h.c:call_async(skt.dohandshake, skt)
-			if not ok then
-				h:close()
-				return nil, err
-			end
-		end
-		cc('now', 1)
-		cc('total', 1)
-
-		local close = h.close
-		function h:close(force)
-			if force then
-				remove_conn(host, port, h)
-				close(h)
-				cc('now', -1)
-				cc('idle', -1)
-				--printop('DISCONNECT', host, port, source_ip, conn_stats())
-			else
-				push_conn(host, port, h)
-			end
-		end
-
-		--printop('CONNECT', host..(port and ':'..port or ''), source_ip, conn_stats())
-
-		--override http methods so we can store and retrieve cookies.
-
-		local sent_uri
-		local sendrequestline = h.sendrequestline
-		function h:sendrequestline(method, uri)
-			sent_uri = uri
-			sendrequestline(self, method, uri)
-		end
-
-		local sendheaders = h.sendheaders
-		function h:sendheaders(headers)
-			local cookies = stored_cookies(source_ip, host, sent_uri)
-			if cookies and #cookies > 0 then
-				headers['Cookie'] = http_cookie.build(cookies)
-			end
-			sendheaders(self, headers)
-		end
-
-		local receiveheaders = h.receiveheaders
-		function h:receiveheaders()
-			local headers = receiveheaders(self)
-
-			local cookies = headers['set-cookie']
-			if cookies then
-				local cookies = http_cookie.parse(cookies)
-				store_cookies(source_ip, host, sent_uri, cookies)
-			end
-
-			return headers
-		end
-
-		return h
-	end
-
-	--cookie jars ----------------------------------------------------------------
+function client:cookie_jar()
 
 	local jars = {} --{client_ip = jar}; jar = {}
 
@@ -218,7 +125,7 @@ function crawler:new(opt)
 	end
 
 	--return: {{name=, value=},...}
-	--[[local]] function stored_cookies(client_ip, host, uri)
+	function stored_cookies(client_ip, host, uri)
 		client_ip = client_ip or '*'
 		local dt = {}
 		local jar = jars[client_ip]
@@ -241,8 +148,62 @@ function crawler:new(opt)
 		end
 		return dt
 	end
+end
 
-	--getpage --------------------------------------------------------------------
+function client:new(t)
+
+	--self.get_source_ip = self:source_ip_roller(self.source_ips)
+	--self.conn_pool = self:connection_pool()
+
+	--[[
+	local source_ip = self:get_source_ip()
+	if source_ip then
+		assert(c:bind(source_ip, 0))
+	end
+
+	function h:close(force)
+		if force then
+			remove_conn(host, port, h)
+			close(h)
+			cc('now', -1)
+			cc('idle', -1)
+		else
+			push_conn(host, port, h)
+		end
+	end
+
+	--override http methods so we can store and retrieve cookies.
+
+	local sent_uri
+	local sendrequestline = h.sendrequestline
+	function h:sendrequestline(method, uri)
+		sent_uri = uri
+		sendrequestline(self, method, uri)
+	end
+
+	local sendheaders = h.sendheaders
+	function h:sendheaders(headers)
+		local cookies = stored_cookies(source_ip, host, sent_uri)
+		if cookies and #cookies > 0 then
+			headers['Cookie'] = http_cookie.build(cookies)
+		end
+		sendheaders(self, headers)
+	end
+
+	local receiveheaders = h.receiveheaders
+	function h:receiveheaders()
+		local headers = receiveheaders(self)
+
+		local cookies = headers['set-cookie']
+		if cookies then
+			local cookies = http_cookie.parse(cookies)
+			store_cookies(source_ip, host, sent_uri, cookies)
+		end
+
+		return headers
+	end
+
+	return h
 
 	local function urlencode(t)
 		local dt = {}
@@ -316,61 +277,6 @@ function crawler:new(opt)
 		return known_ext[ext] and ext or nil
 	end
 
-	local function req_filename(req)
-		local url = req.url
-		local ext = url_fileext(url) or 'html'
-		local filename = url:gsub('[%:/=%?%&]', '_')..'.'..ext
-		filename = filename:lower()
-		if req.method and req.method:lower() ~= 'get' then
-			filename = req.method:lower() .. '_' .. filename
-		end
-		local crc = string.format('%x', zlib.crc32(filename))
-		local subdir = crc:sub(-4):gsub('(.)', '%1') --last 4 digits of crc
-		local dir = path.combine(self.cache_dir, subdir)
-		assert(fs.mkdir(dir, true))
-		return path.combine(dir, filename), subdir
-	end
-
-	local function should_cache(url)
-		if not self.cache_pages then return end
-		local ext = url_fileext(url) or 'html'
-		if ext ~= 'html' then return end --we only cache htmls
-		return true
-	end
-
-	--getpage that caches the result.
-	local function getpage_with_cache(req)
-		local url = req.url
-		local should_cache = should_cache(url)
-		local file, subdir = req_filename(req)
-		local body = self.read_cache_pages and glue.readfile(file)
-		if body then
-			if self.print_urls then
-				print('[C] '..subdir..' '..url)
-			end
-			return body, 200
-		else
-			local start_time = socket.gettime()
-			local body, code, headers = download_page(req)
-			if not body then
-				lognet(url, '\n\t', pp.format(code))
-				return body, code, headers
-			end
-			if code ~= 200 and self.print_redirects then
-				lognet(url, '\n\thttp ', code)
-			end
-			if code == 200 and should_cache then
-				glue.writefile(file, body)
-			end
-			local time = socket.gettime() - start_time
-			if self.print_urls then
-				print(string.format('[D] %s (%d) %s %.1fs',
-					url, code, kbytes(body) or '',  time))
-			end
-			return body, code, headers
-		end
-	end
-
 	--getpage with bells:
 	-- * makes an async request if a completion callback is given.
 	-- * starts the loop if called from the main thread.
@@ -399,8 +305,56 @@ function crawler:new(opt)
 			return getpage_with_cache(req)
 		end
 	end
+	]]
+
+	local self, super = t or {}, self
+	self.__index = super
+	setmetatable(self, self)
+
+	--
 
 	return self
+end
+
+function client:redirect(t, req, res)
+	local location = assert(res.redirect_location, 'no location')
+	local loc = uri.parse(location)
+	local uri = uri.format{path = loc.path, query = loc.query, fragment = loc.fragment}
+	return self:call{
+		http_version = res.http_version,
+		method = req.method,
+		close = t.close,
+		host = loc.host or t.host,
+		port = loc.port or (not loc.host and t.port or nil)
+			or loc.scheme == 'https' and 443 or nil,
+		uri = uri,
+		content = t.content,
+		content_size = t.content_size,
+		compress = t.compress,
+		headers = t.headers,
+		receive_content = t.receive_content,
+	}
+end
+
+function client:call(t)
+	local sock = socket.tcp()
+	assert(sock:connect(t.host, t.port or 80))
+	local http = http:new()
+	http:bind_luasocket(sock)
+	t.close = true
+	local res, req = http:perform_request(t)
+	if not t.noredirect then
+		local n = 0
+		while res.redirect_location do
+			if n >= self.max_redirect_count then
+				http:close()
+				return nil, 'too many redirects'
+			end
+			res, req = self:redirect(t, req, res)
+			n = n + 1
+		end
+	end
+	return res, req
 end
 
 --test download speed --------------------------------------------------------
@@ -423,7 +377,7 @@ end
 
 local function speed_test()
 
-	local crawler = crawler:new{
+	local client = client:new{
 		--
 	}
 
@@ -443,7 +397,7 @@ local function speed_test()
 				pn = pn + 1
 				local pn = pn
 				local url = search_page_url(pn)
-				local body, code, headers = crawler:getpage(url)
+				local body, code, headers = client:getpage(url)
 				if body then
 					timepoint('http '..code .. ' - ' .. kbytes(body) ..
 						' (page '.. pn .. ')')
@@ -463,7 +417,12 @@ local function speed_test()
 	print('Speed:      ', mbytes(bytes / (t1 - t0))..'/s')
 end
 
-speed_test()
+--speed_test()
+
+local client = client:new()
+pp(client:call{
+	host = 'luapower.com',
+})
 
 end
 
