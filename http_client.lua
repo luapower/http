@@ -7,6 +7,7 @@ local socket = require'socket'
 local http = require'http'
 local uri = require'uri'
 local glue = require'glue'
+http.zlib = require'zlib'
 local tuple2 = glue.tuples(2)
 
 local client = {
@@ -319,14 +320,19 @@ end
 function client:redirect(t, req, res)
 	local location = assert(res.redirect_location, 'no location')
 	local loc = uri.parse(location)
-	local uri = uri.format{path = loc.path, query = loc.query, fragment = loc.fragment}
+	local uri = uri.format{
+		path = loc.path,
+		query = loc.query,
+		fragment = loc.fragment,
+	}
+	local https = loc.scheme == 'https' or nil
 	return self:call{
 		http_version = res.http_version,
 		method = req.method,
 		close = t.close,
 		host = loc.host or t.host,
-		port = loc.port or (not loc.host and t.port or nil)
-			or loc.scheme == 'https' and 443 or nil,
+		port = loc.port or (not loc.host and t.port or nil) or nil,
+		https = https,
 		uri = uri,
 		content = t.content,
 		content_size = t.content_size,
@@ -338,9 +344,13 @@ end
 
 function client:call(t)
 	local sock = socket.tcp()
-	assert(sock:connect(t.host, t.port or 80))
+	assert(sock:connect(t.host, t.port or (t.https and 443 or 80)))
 	local http = http:new()
 	http:bind_luasocket(sock)
+	if t.https then
+		local ok, err = http:bind_luasec(sock, t.host)
+		if not ok then return nil, err end
+	end
 	t.close = true
 	local res, req = http:perform_request(t)
 	if not t.noredirect then
@@ -421,6 +431,8 @@ end
 
 local client = client:new()
 pp(client:call{
+	--host = 'www.websiteoptimization.com',
+	--uri = '/speed/tweak/compress/',
 	host = 'luapower.com',
 })
 

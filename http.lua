@@ -82,11 +82,13 @@ function http:read_until_closed(write_content)
 	end
 end
 
+http.linebuffer_size = 8192
+
 function http:create_linebuffer()
 	local function read(buf, sz)
 		return self:read(buf, sz)
 	end
-	self.linebuffer = stream.linebuffer(read, '\r\n', 8192)
+	self.linebuffer = stream.linebuffer(read, '\r\n', self.linebuffer_size)
 end
 
 --request line & status line -------------------------------------------------
@@ -241,6 +243,7 @@ function http:read_headers(rawheaders)
 		end
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
+		print(string.format('header  %-20s %s', name, value))
 		if rawheaders[name] then --headers can be duplicate.
 			rawheaders[name] = rawheaders[name] .. ',' .. value
 		else
@@ -362,7 +365,7 @@ function http:read_body_to_writer(headers, write, from_server, close_connection)
 	end
 	write = self:chained_decoder(write, headers['content-encoding'])
 	local te = headers['transfer-encoding']
-	if te and te.chunked then
+	if te and te[#te] == 'chunked' then
 		self:read_chunks(write)
 	elseif headers['content-length'] then
 		self:read_exactly(headers['content-length'], write)
@@ -656,61 +659,87 @@ http:protect'send_response'
 
 --luasocket binding ----------------------------------------------------------
 
-local P = require'pp'.format
-local S = function(s) return tostring(s):sub(-6) end
+local pp = require'pp'
+local time = require'time'
+local t0 = time.clock()
+local S = function(s)
+	s = tostring(s)
+	s = s:match('tcp{client}: (%x+)') or s:match'0x(%x+)'
+	s = s:sub(-6)
+	return string.format('<%s> %04.02f', s, time.clock() - t0)
+end
+local P = function(s)
+	return pp.format(s)
+end
 
 function http:bind_luasocket(sock)
 
-	sock:settimeout(0)
+	--sock:settimeout(0)
+
+	function self:setsocket(newsock)
+		sock = newsock
+	end
 
 	function self:read(buf, sz)
 		local s = ''
 		while s == '' do
 			local s1, err, p = sock:receive(sz)
-			if s1 or p then
-				s = s .. (s1 or p)
+			s1 = s1 or p
+			if s1 and #s1 > 0 then
+				s = s .. s1
 			elseif err ~= 'timeout' then
 				return nil, err
 			end
 		end
 		assert(#s <= sz)
 		ffi.copy(buf, s, #s)
-		print('recv', S(sock), P(s))
+		print('recv', S(sock), #s, P(s))
 		return #s
 	end
 
 	function self:send(buf, sz)
 		sz = sz or #buf
 		local s = ffi.string(buf, sz)
-		print('send', S(sock), P(s))
+		print('send', S(sock), #s, P(s))
 		return sock:send(s)
 	end
 
 	function self:close()
 		sock:close()
-		print('closed', sock)
+		print('closed', S(sock))
 	end
 end
 
 --luasec binding -------------------------------------------------------------
 
-function http:wrap_luasec(sock, host)
+function http:bind_luasec(sock, host)
 	local ssl = require'ssl'
-	local ssock = ssl.wrap(sock:getsocket(), {
+	local ssock = ssl.wrap(sock, {
 		protocol = 'any',
 		options  = {'all', 'no_sslv2', 'no_sslv3', 'no_tlsv1'},
 		verify   = 'none',
 		mode     = 'client',
 	})
 	ssock:sni(host)
-	assert(ssock:settimeout(0, 'b'))
-	assert(ssock:settimeout(0, 't'))
-	sock:setsocket(ssock)
-	local ok, err = sock:call_async(ssock.dohandshake, ssock)
+	--assert(ssock:settimeout(0, 'b'))
+	--assert(ssock:settimeout(0, 't'))
+	self:setsocket(ssock)
+	local ok, err
+	if ssock.call_async then
+		ok, err = ssock:call_async(ssock.dohandshake, ssock)
+	else
+		while true do
+			ok, err = ssock:dohandshake()
+			if ok or (err ~= 'wantread' and err ~= 'wantwrite') then
+				break
+			end
+		end
+	end
 	if not ok then
-		h:close()
+		self:close()
 		return nil, err
 	end
+	return true
 end
 
 --instantiation --------------------------------------------------------------
