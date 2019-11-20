@@ -18,8 +18,9 @@ local http = {}
 
 local protocol_error = {}
 
-local function check(ok, err)
-	return assert(ok, setmetatable({message = err}, protocol_error))
+local function check(v, err)
+	if v then return v end
+	error(setmetatable({message = err}, protocol_error))
 end
 http.check = check
 
@@ -35,7 +36,7 @@ local function pass(self, ok, ...)
 	self:close()
 	local err = ...
 	if getmetatable(err) == protocol_error then
-		return nil, err.message
+		return nil, err.message or 'protocol error'
 	else
 		error(err, 2)
 	end
@@ -211,16 +212,15 @@ http.remove = {}
 --passing a table as value will generate duplicate headers for each value
 --  (set-cookie will come like that because it's not safe to send it folded).
 function http:send_headers(headers)
-	local names, values = {}, {}
 	for k, v in glue.sortedpairs(headers) do
 		if v ~= http.remove then
 			k, v = self:format_header(k, v)
 			if type(v) == 'table' then --must be sent unfolded.
 				for i,v in ipairs(v) do
-					self:send(string.format('%s: %s\r\n', name, v))
+					self:send(string.format('%s: %s\r\n', k, v))
 				end
 			else
-				self:send(string.format('%s: %s\r\n', name, v))
+				self:send(string.format('%s: %s\r\n', k, v))
 			end
 		end
 	end

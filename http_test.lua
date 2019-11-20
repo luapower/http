@@ -2,6 +2,7 @@
 local http = require'http'
 local socket = require'socket'
 local ffi = require'ffi'
+local http_headers = require'http_headers'
 http.zlib = require'zlib'
 
 local function P(s)
@@ -16,10 +17,11 @@ local function wrap_sock(sock, http)
 		local s = ''
 		while s == '' do
 			local s1, err, p = sock:receive(sz)
-			if err ~= 'timeout' then
+			if s1 or p then
+				s = s .. (s1 or p)
+			elseif err ~= 'timeout' then
 				return nil, err
 			end
-			s = s .. (s1 or p)
 		end
 		assert(#s <= sz)
 		ffi.copy(buf, s, #s)
@@ -31,7 +33,7 @@ local function wrap_sock(sock, http)
 		sz = sz or #buf
 		local s = ffi.string(buf, sz)
 		print('send', sock, P(s))
-		assert(sock:send(s))
+		return sock:send(s)
 	end
 
 	function http:close()
@@ -63,15 +65,18 @@ local function test_client()
 
 	local write_body, flush_body = wrap_sock(sock, client)
 
-	pp(client:try('perform_request', {
+	local res, req = client:perform_request{
 		uri = uri,
 		host = host,
 		headers = {
 		},
-		method = 'POST',
-		content = '',
+		--method = 'POST',
+		--content = '',
 		close = true,
-	}, write_body))
+		receive_content = write_body,
+	}
+	local h = http_headers.parse_headers(res.rawheaders)
+	pp(res, req, h)
 
 	print('body', sock, P(flush_body()))
 
@@ -115,5 +120,5 @@ local function test_server()
 	end
 end
 
---test_client()
-test_server()
+test_client()
+--test_server()

@@ -581,6 +581,14 @@ function headers.parsed_headers(rawheaders)
 	end})
 end
 
+function headers.parse_headers(rawheaders)
+	local t = {}
+	for k, v in pairs(rawheaders) do
+		t[k] = headers.parse_header(k, v)
+	end
+	return t
+end
+
 --formatting -----------------------------------------------------------------
 
 local ci = string.lower
