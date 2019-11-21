@@ -243,7 +243,6 @@ function http:read_headers(rawheaders)
 		end
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
-		print(string.format('header  %-20s %s', name, value))
 		if rawheaders[name] then --headers can be duplicate.
 			rawheaders[name] = rawheaders[name] .. ',' .. value
 		else
@@ -357,13 +356,11 @@ function http:send_body(content, content_size, content_encoding, transfer_encodi
 	end
 end
 
-local function null_writer() end
+local function null_write() end
 
 function http:read_body_to_writer(headers, write, from_server, close_connection)
-	if not write then
-		write = null_writer
-	end
-	write = self:chained_decoder(write, headers['content-encoding'])
+	write = write and self:chained_decoder(write, headers['content-encoding'])
+		or null_write
 	local te = headers['transfer-encoding']
 	if te and te[#te] == 'chunked' then
 		self:read_chunks(write)
@@ -376,10 +373,11 @@ end
 
 function http:read_body(headers, write, ...)
 	if write == 'string' or write == 'buffer' then
+		local to_string = write == 'string'
 		local write, get = stream.dynarray_writer()
 		self:read_body_to_writer(headers, write, ...)
 		local buf, sz = get()
-		if write == 'string' then
+		if to_string then
 			return ffi.string(buf, sz)
 		else
 			return buf, sz
@@ -398,7 +396,9 @@ function http:make_request(t)
 	req.uri = t.uri or '/'
 	req.headers = {}
 	assert(t.host, 'host missing') --the only required field, even for HTTP/1.0.
-	req.headers['host'] = {host = t.host, port = t.port}
+	local default_port = t.https and 443 or 80
+	local port = t.port ~= default_port and t.port or nil
+	req.headers['host'] = {host = t.host, port = port}
 	req.close = t.close or req.http_version == '1.0'
 	if req.close then
 		req.headers['connection'] = 'close'
@@ -414,6 +414,8 @@ function http:make_request(t)
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
 	glue.update(req.headers, t.headers)
 	req.receive_content = t.receive_content
+	req.https = t.https
+	req.client_ip = t.client_ip
 	return req
 end
 
@@ -423,7 +425,9 @@ function http:send_request(req)
 	self:send_body(req.content, req.content_size,
 		req.headers['content-encoding'],
 		req.headers['transfer-encoding'])
+	return true
 end
+http:protect'send_request'
 
 function http:should_have_response_body(method, status)
 	if method == 'HEAD' then return nil end
@@ -477,14 +481,16 @@ function http:read_response(req)
 
 	return res
 end
+http:protect'read_response'
 
 function http:perform_request(t)
 	local req = self:make_request(t)
-	self:send_request(req)
-	local res = self:read_response(req)
+	local ok, err = self:send_request(req)
+	if not ok then return nil, err end
+	local res, err = self:read_response(req)
+	if not res then return nil, err end
 	return res, req
 end
-http:protect'perform_request'
 
 --server side ----------------------------------------------------------------
 
@@ -669,16 +675,13 @@ local S = function(s)
 	return string.format('<%s> %04.02f', s, time.clock() - t0)
 end
 local P = function(s)
-	return pp.format(s)
+	return #s --pp.format(s)
 end
 
 function http:bind_luasocket(sock)
 
-	--sock:settimeout(0)
-
-	function self:setsocket(newsock)
-		sock = newsock
-	end
+	function self:getsocket() return sock end
+	function self:setsocket(newsock) sock = newsock end
 
 	function self:read(buf, sz)
 		local s = ''
@@ -687,26 +690,26 @@ function http:bind_luasocket(sock)
 			s1 = s1 or p
 			if s1 and #s1 > 0 then
 				s = s .. s1
-			elseif err ~= 'timeout' then
+			else
 				return nil, err
 			end
 		end
 		assert(#s <= sz)
 		ffi.copy(buf, s, #s)
-		print('recv', S(sock), #s, P(s))
+		--print('recv', S(sock), #s, P(s))
 		return #s
 	end
 
 	function self:send(buf, sz)
 		sz = sz or #buf
 		local s = ffi.string(buf, sz)
-		print('send', S(sock), #s, P(s))
+		--print('send', S(sock), #s, P(s))
 		return sock:send(s)
 	end
 
 	function self:close()
 		sock:close()
-		print('closed', S(sock))
+		--print('closed', S(sock))
 	end
 end
 
@@ -721,12 +724,10 @@ function http:bind_luasec(sock, host)
 		mode     = 'client',
 	})
 	ssock:sni(host)
-	--assert(ssock:settimeout(0, 'b'))
-	--assert(ssock:settimeout(0, 't'))
-	self:setsocket(ssock)
+	sock:setsocket(ssock)
 	local ok, err
-	if ssock.call_async then
-		ok, err = ssock:call_async(ssock.dohandshake, ssock)
+	if sock.call_async then
+		ok, err = sock:call_async(sock.dohandshake, sock)
 	else
 		while true do
 			ok, err = ssock:dohandshake()
