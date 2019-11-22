@@ -396,8 +396,8 @@ function http:make_request(t)
 	req.uri = t.uri or '/'
 	req.headers = {}
 	assert(t.host, 'host missing') --the only required field, even for HTTP/1.0.
-	local default_port = t.https and 443 or 80
-	local port = t.port ~= default_port and t.port or nil
+	local default_port = self.https and 443 or 80
+	local port = self.port ~= default_port and self.port or nil
 	req.headers['host'] = {host = t.host, port = port}
 	req.close = t.close or req.http_version == '1.0'
 	if req.close then
@@ -414,8 +414,6 @@ function http:make_request(t)
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
 	glue.update(req.headers, t.headers)
 	req.receive_content = t.receive_content
-	req.https = t.https
-	req.client_ip = t.client_ip
 	return req
 end
 
