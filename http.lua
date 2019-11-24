@@ -26,7 +26,7 @@ http.check = check
 
 local function catch(err)
 	if getmetatable(err) ~= protocol_error then
-		return debug.traceback(err)
+		return debug.traceback('\n'..err)
 	else
 		return err
 	end
@@ -456,7 +456,7 @@ function http:read_response(req)
 	res.headers = self:parsed_headers(res.rawheaders)
 
 	res.close = req.close
-		or res.headers['connection'].close
+		or (res.headers['connection'] and res.headers['connection'].close)
 		or res.http_version == '1.0'
 
 	local receive_content = req.receive_content
@@ -615,7 +615,8 @@ function http:send_response(req, t)
 
 	res.http_version = t.http_version or req.http_version
 
-	res.close = t.close or req.headers['connection'].close
+	res.close = t.close
+		or (req.headers['connection'] and req.headers['connection'].close)
 	if res.close then
 		res.headers['connection'] = 'close'
 	end
@@ -673,7 +674,7 @@ local S = function(s)
 	return string.format('<%s> %04.02f', s, time.clock() - t0)
 end
 local P = function(s)
-	return #s --pp.format(s)
+	return pp.format(s)
 end
 
 function http:bind_luasocket(sock)
@@ -682,32 +683,24 @@ function http:bind_luasocket(sock)
 	function self:setsocket(newsock) sock = newsock end
 
 	function self:read(buf, sz)
-		local s = ''
-		while s == '' do
-			local s1, err, p = sock:receive(sz)
-			s1 = s1 or p
-			if s1 and #s1 > 0 then
-				s = s .. s1
-			else
-				return nil, err
-			end
-		end
+		local s, err = sock:receive(sz)
+		if not s then return nil, err end
 		assert(#s <= sz)
 		ffi.copy(buf, s, #s)
-		--print('recv', S(sock), #s, P(s))
+		print('recv', S(sock), #s, P(s))
 		return #s
 	end
 
 	function self:send(buf, sz)
 		sz = sz or #buf
 		local s = ffi.string(buf, sz)
-		--print('send', S(sock), #s, P(s))
+		print('send', S(sock), #s, P(s))
 		return sock:send(s)
 	end
 
 	function self:close()
 		sock:close()
-		--print('closed', S(sock))
+		print('closed', S(sock))
 	end
 end
 

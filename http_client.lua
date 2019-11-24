@@ -2,12 +2,12 @@
 --async http(s) downloader.
 --Written by Cosmin Apreutesei. Public Domain.
 
-local loop = require'socketloop'.coro
+local loop = require'socketloop'
 local http = require'http'
 local uri = require'uri'
 local time = require'time'
 local glue = require'glue'
-http.zlib = require'zlib'
+--http.zlib = require'zlib'
 local attr = glue.attr
 
 local push = table.insert
@@ -20,8 +20,6 @@ local client = {
 	max_conn_per_session = 10, --a session is (host, port, client_ip)
 	socket_timeout = 5,
 	client_ips = {},
-	print_urls = false,
-	print_redirects = false,
 	max_retries = 0,
 	user_agent = 'Mozilla/5.0 (Windows NT 5.1)',
 	max_redirects = 20,
@@ -54,6 +52,7 @@ function client:conn(t)
 end
 
 function client:conn_data(k)
+	if not k then print(debug.traceback()) end
 	return attr(self._conn_data, k)
 end
 
@@ -69,7 +68,47 @@ function client:discount_conn(k)
 	t.count = t.count - 1
 end
 
-function clent:can_connect_now(k)
+function client:push_ready_conn(k, http)
+	push(attr(self:conn_data(k), 'ready'), http)
+end
+
+function client:pull_ready_conn(k)
+	local t = self:conn_data(k).ready
+	return t and pull(t)
+end
+
+function client:push_wait_response_thread(http, thread)
+	push(attr(http, 'wait_response_threads'), thread)
+end
+
+function client:pull_wait_response_thread(http)
+	local t = http.wait_response_threads
+	return t and pull(t)
+end
+
+function client:push_wait_conn_thread(thread, k)
+	local queue = attr(self, 'wait_conn_queue')
+	push(queue, {thread, k})
+end
+
+function client:pull_wait_conn_thread(k) --returns thread, k
+	local queue = self.wait_conn_queue
+	if not queue then return end
+	if k then
+		for i,t in ipairs(queue) do
+			if t[2] == k then
+				table.remove(queue, i)
+				return t[1]
+			end
+		end
+	else
+		local t = pull(queue)
+		if not t then return end
+		return t[1], t[2]
+	end
+end
+
+function client:can_connect_now(k)
 	local conn_count = self.conn_count
 	if conn_count >= self.max_conn then
 		return false, 'too many connections'
@@ -82,7 +121,7 @@ end
 
 function client:connect(k)
 	local host, port, client_ip = k()
-	local sock, err = loop.create_connection(client_ip)
+	local sock, err = loop.tcp(client_ip)
 	if not sock then return nil, err end
 	self:count_conn(k)
 	local ok, err = sock:connect(host, port)
@@ -92,6 +131,7 @@ function client:connect(k)
 	end
 	glue.after(sock, 'close', function()
 		self:discount_conn(k)
+		self:resume_next_wait_conn_thread()
 	end)
 	local http = http:new{
 		host = host,
@@ -99,30 +139,48 @@ function client:connect(k)
 		https = k.https,
 	}
 	http:bind_luasocket(sock)
-	if https then
+	if k.https then
 		local ok, err = http:bind_luasec(sock, host)
 		if not ok then return nil, err end
 	end
 	return http
 end
 
-function client:pull_conn(k)
-	local t = self:conn_data(k).ready
-	return t and pull(t)
-end
-
-function client:push_conn(k, http)
-	push(attr(self:conn_data(k), 'ready'), http)
-end
-
 function client:wait_conn(k)
-	push(attr(self:conn_data(k), 'wait'), loop.current())
-	loop.suspend()
+	self:push_wait_conn_thread(loop.current(), k)
+	return loop.suspend() --http, err
 end
 
-function client:wait_response(http, req)
-	push(attr(http, 'wait_response_queue'), loop.current())
-	loop.suspend()
+function client:resume_next_wait_conn_thread()
+	local thread, k = self:pull_wait_conn_thread()
+	if not thread then return end
+	local http, err = self:connect(k, true)
+	loop.resume(thread, http, err)
+end
+
+function client:wait_read_response(http)
+	self:push_wait_response_thread(http, loop.current())
+	print'wait_read_response'
+	local res, err = loop.suspend() --res, err
+	print('wait_read_response done', res, err)
+	return res, err
+end
+
+function client:read_response_now(http, req)
+	http.reading_response = true
+	print'read_response_now'
+	local res, err = http:read_response(req)
+	http.reading_response = false
+	print'read_response_now done'
+	return res, err
+end
+
+function client:read_response(http, req)
+	if http.reading_response then
+		return self:wait_read_response(http)
+	else
+		return self:read_response_now(http, req)
+	end
 end
 
 function client:redirect_request_args(t, req, res)
@@ -152,20 +210,34 @@ end
 
 function client:request(t)
 	local k = self:conn(t)
-	local http, err = self:pull_conn()
+	local http, err = self:pull_ready_conn(k)
 	if not http then
 		if self:can_connect_now(k) then
 			http, err = self:connect(k)
 		else
 			http, err = self:wait_conn(k)
 		end
-		if not http then return nil, err end
 	end
+	if not http then return nil, err end
 	local req = http:make_request(t)
 	local ok, err = http:send_request(req)
-	if not ok then return nil, err end
-	self:push_conn(k, http)
-	return self:wait_response(http, req)
+	if not ok then return nil, err, req end
+	if not (t.close or t.pipeline == false) then
+		local thread = self:pull_wait_conn_thread(k)
+		print('pull_wait_conn_thread', thread)
+		if thread then
+			print'RESUMING'
+			loop.resume(thread, http)
+			print'HERE'
+		else
+			self:push_ready_conn(k, http)
+		end
+	end
+	print'HERE2'
+	local res, err = self:read_response(http, req)
+	print('HERE3', res, err)
+	if not res then return nil, err, req end
+	return res, req
 end
 
 function client:new(t)
@@ -195,22 +267,29 @@ function mbytes(n)
 	return n and string.format('%.1fmB', n/(1024*1024))
 end
 
+local client = client:new()
+client.max_conn = 1
 local n = 0
 for i=1,1 do
 	loop.newthread(function()
-		local client = client:new()
-		local res, req = client:call{
-			--host = 'www.websiteoptimization.com',
-			--uri = '/speed/tweak/compress/',
-			host = 'luapower.com',
-			https = true,
+		local res, req = client:request{
+			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
+			host = 'luapower.com', uri = '/files/test.txt', https = true,
+			--host = 'mokingburd.de',
+			--host = 'www.google.com', https = true,
 			receive_content = 'string',
 		}
-		n = n + #res.content
+		if res then
+			n = n + #res.content
+			pp(req)
+			pp(res)
+		else
+			print('ERROR:', req)
+		end
 	end)
 end
 local t0 = time.clock()
-loop.start(5)
+loop.start()
 t1 = time.clock()
 print(mbytes(n / (t1 - t0))..'/s')
 
