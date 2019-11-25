@@ -48,11 +48,12 @@ function client:conn(t)
 	else
 		assert(k.https == https)
 	end
+	k.debug = t.debug
+	k.max_line_size = t.max_line_size
 	return k
 end
 
 function client:conn_data(k)
-	if not k then print(debug.traceback()) end
 	return attr(self._conn_data, k)
 end
 
@@ -77,13 +78,15 @@ function client:pull_ready_conn(k)
 	return t and pull(t)
 end
 
-function client:push_wait_response_thread(http, thread)
-	push(attr(http, 'wait_response_threads'), thread)
+function client:push_wait_response_thread(http, thread, req)
+	push(attr(http, 'wait_response_threads'), {thread, req})
 end
 
-function client:pull_wait_response_thread(http)
-	local t = http.wait_response_threads
-	return t and pull(t)
+function client:pull_wait_response_thread(http) --returns thread, req
+	local queue = http.wait_response_threads
+	local t = queue and pull(queue)
+	if not t then return end
+	return t[1], t[2]
 end
 
 function client:push_wait_conn_thread(thread, k)
@@ -93,18 +96,19 @@ end
 
 function client:pull_wait_conn_thread(k) --returns thread, k
 	local queue = self.wait_conn_queue
+	local t = queue and pull(queue)
+	if not t then return end
+	return t[1], t[2]
+end
+
+function client:pull_matching_wait_conn_thread(k)
+	local queue = self.wait_conn_queue
 	if not queue then return end
-	if k then
-		for i,t in ipairs(queue) do
-			if t[2] == k then
-				table.remove(queue, i)
-				return t[1]
-			end
+	for i,t in ipairs(queue) do
+		if t[2] == k then
+			table.remove(queue, i)
+			return t[1]
 		end
-	else
-		local t = pull(queue)
-		if not t then return end
-		return t[1], t[2]
 	end
 end
 
@@ -119,7 +123,7 @@ function client:can_connect_now(k)
 	return true
 end
 
-function client:connect(k)
+function client:connect_new(k)
 	local host, port, client_ip = k()
 	local sock, err = loop.tcp(client_ip)
 	if not sock then return nil, err end
@@ -131,12 +135,14 @@ function client:connect(k)
 	end
 	glue.after(sock, 'close', function()
 		self:discount_conn(k)
-		self:resume_next_wait_conn_thread()
+		self:connect_and_resume_next_wait_conn_thread()
 	end)
 	local http = http:new{
 		host = host,
 		port = port,
 		https = k.https,
+		debug = k.debug,
+		max_line_size = k.max_line_size,
 	}
 	http:bind_luasocket(sock)
 	if k.https then
@@ -151,35 +157,48 @@ function client:wait_conn(k)
 	return loop.suspend() --http, err
 end
 
-function client:resume_next_wait_conn_thread()
+function client:connect_and_resume_next_wait_conn_thread()
 	local thread, k = self:pull_wait_conn_thread()
 	if not thread then return end
-	local http, err = self:connect(k, true)
+	local http, err = self:connect_new(k)
 	loop.resume(thread, http, err)
 end
 
-function client:wait_read_response(http)
-	self:push_wait_response_thread(http, loop.current())
-	print'wait_read_response'
-	local res, err = loop.suspend() --res, err
-	print('wait_read_response done', res, err)
+function client:resume_matching_wait_conn_thread(k, http)
+	local thread = self:pull_matching_wait_conn_thread(k)
+	if not thread then return end
+	loop.resume(thread, http)
+	return true
+end
+
+function client:wait_read_response(http, req)
+	self:push_wait_response_thread(http, loop.current(), req)
+	local res, err = loop.suspend()
 	return res, err
+end
+
+function client:resume_read_response(http)
+	local thread, req = self:pull_wait_response_thread(http)
+	if not thread then return end
+	local res, err = self:read_response(http, req)
+	loop.resume(thread, res, err)
 end
 
 function client:read_response_now(http, req)
 	http.reading_response = true
-	print'read_response_now'
 	local res, err = http:read_response(req)
 	http.reading_response = false
-	print'read_response_now done'
 	return res, err
 end
 
 function client:read_response(http, req)
 	if http.reading_response then
-		return self:wait_read_response(http)
+		return self:wait_read_response(http, req)
 	else
-		return self:read_response_now(http, req)
+		local res, err = self:read_response_now(http, req)
+		if not res then return nil, err end
+		self:resume_read_response(http)
+		return res, err
 	end
 end
 
@@ -213,7 +232,7 @@ function client:request(t)
 	local http, err = self:pull_ready_conn(k)
 	if not http then
 		if self:can_connect_now(k) then
-			http, err = self:connect(k)
+			http, err = self:connect_new(k)
 		else
 			http, err = self:wait_conn(k)
 		end
@@ -223,19 +242,11 @@ function client:request(t)
 	local ok, err = http:send_request(req)
 	if not ok then return nil, err, req end
 	if not (t.close or t.pipeline == false) then
-		local thread = self:pull_wait_conn_thread(k)
-		print('pull_wait_conn_thread', thread)
-		if thread then
-			print'RESUMING'
-			loop.resume(thread, http)
-			print'HERE'
-		else
+		if not self:resume_matching_wait_conn_thread(k, http) then
 			self:push_ready_conn(k, http)
 		end
 	end
-	print'HERE2'
 	local res, err = self:read_response(http, req)
-	print('HERE3', res, err)
 	if not res then return nil, err, req end
 	return res, req
 end
@@ -273,23 +284,24 @@ local n = 0
 for i=1,1 do
 	loop.newthread(function()
 		local res, req = client:request{
-			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
-			host = 'luapower.com', uri = '/files/test.txt', https = true,
+			host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
+			--host = 'luapower.com', uri = '/', https = true,
 			--host = 'mokingburd.de',
 			--host = 'www.google.com', https = true,
 			receive_content = 'string',
+			debug = true,
+			max_line_size = 1024,
 		}
 		if res then
 			n = n + #res.content
-			pp(req)
-			pp(res)
+			print('REQUEST', req.http.host, req.http.port, req.uri, #res.content)
 		else
 			print('ERROR:', req)
 		end
 	end)
 end
 local t0 = time.clock()
-loop.start()
+loop.start(5)
 t1 = time.clock()
 print(mbytes(n / (t1 - t0))..'/s')
 

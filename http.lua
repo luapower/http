@@ -58,12 +58,14 @@ function http:send (buf, sz)    error'not implemented' end
 
 function http:read_exactly(n, write)
 	local read = self.linebuffer.read
+	local n0 = n
 	while n > 0 do
 		local buf, sz = read(n)
 		check(buf, sz)
 		write(buf, sz)
 		n = n - sz
 	end
+	print('READ_EXACTLY', n0, n)
 end
 
 function http:read_line()
@@ -82,13 +84,13 @@ function http:read_until_closed(write_content)
 	end
 end
 
-http.linebuffer_size = 8192
+http.max_line_size = 8192
 
 function http:create_linebuffer()
 	local function read(buf, sz)
 		return self:read(buf, sz)
 	end
-	self.linebuffer = stream.linebuffer(read, '\r\n', self.linebuffer_size)
+	self.linebuffer = stream.linebuffer(read, '\r\n', self.max_line_size)
 end
 
 --request line & status line -------------------------------------------------
@@ -188,7 +190,8 @@ function http:send_status_line(status, message, http_version)
 end
 
 function http:read_status_line()
-	local http_version, status = self:read_line():match'^HTTP/(%d+%.%d+)%s+(%d%d%d)'
+	local line = self:read_line()
+	local http_version, status = line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)'
 	status = tonumber(status)
 	check(http_version and status, 'invalid status line')
 	return http_version, status
@@ -272,6 +275,7 @@ function http:read_chunks(write_content)
 	while true do
 		local line = self:read_line()
 		local size = tonumber(string.gsub(line, ';.*', ''), 16) --size[; extension]
+		print('CHUNK', line, size)
 		check(size, 'invalid chunk size')
 		if size == 0 then break end --last chunk (trailers not supported)
 		self:read_exactly(size, write_content)
@@ -390,7 +394,7 @@ end
 --client-side ----------------------------------------------------------------
 
 function http:make_request(t)
-	local req = {}
+	local req = {http = self}
 	req.http_version = t.http_version or '1.1'
 	req.method = t.method or 'GET'
 	req.uri = t.uri or '/'
@@ -664,44 +668,31 @@ http:protect'send_response'
 
 --luasocket binding ----------------------------------------------------------
 
-local pp = require'pp'
-local time = require'time'
-local t0 = time.clock()
-local S = function(s)
-	s = tostring(s)
-	s = s:match('tcp{client}: (%x+)') or s:match'0x(%x+)'
-	s = s:sub(-6)
-	return string.format('<%s> %04.02f', s, time.clock() - t0)
-end
-local P = function(s)
-	return pp.format(s)
-end
-
 function http:bind_luasocket(sock)
 
 	function self:getsocket() return sock end
 	function self:setsocket(newsock) sock = newsock end
 
 	function self:read(buf, sz)
-		local s, err = sock:receive(sz)
+		local s, err, p = sock:receive(sz, nil, true)
+		print(sz, '->', s and #s, err, p and #p)
 		if not s then return nil, err end
 		assert(#s <= sz)
 		ffi.copy(buf, s, #s)
-		print('recv', S(sock), #s, P(s))
 		return #s
 	end
 
 	function self:send(buf, sz)
 		sz = sz or #buf
 		local s = ffi.string(buf, sz)
-		print('send', S(sock), #s, P(s))
 		return sock:send(s)
 	end
 
 	function self:close()
 		sock:close()
-		print('closed', S(sock))
 	end
+
+	self:install_debug_hooks()
 end
 
 --luasec binding -------------------------------------------------------------
@@ -731,7 +722,61 @@ function http:bind_luasec(sock, host)
 		self:close()
 		return nil, err
 	end
+
 	return true
+end
+
+--debug hooks ----------------------------------------------------------------
+
+function http:install_debug_hooks()
+
+	if not self.debug or self.debug_hooks_installed then return end
+
+	local pp = require'pp'
+	local time = require'time'
+	local loop = require'socketloop'
+	local t0 = time.clock()
+	local st, tt = {n = 0}, {n = 0}
+	local function id(s, t)
+		if not t[s] then t.n = t.n + 1; t[s] = t.n; end
+		return t[s]
+	end
+	local P = function(cmd, s)
+		local sock = self:getsocket()
+		local S = tostring(sock)
+		local S = S:match('tcp{client}: (%x+)') or S:match'0x(%x+)'
+		local S = id(S, st)
+		local T = tostring(loop.current())
+		local T = T:match'0x(%x+)'
+		local T = id(T, tt)
+		local len = s and #s or 0
+		local s = s and s
+			:gsub('\r\n', '\n'..(' '):rep(23))
+			:gsub('\n%s*$', '')
+			:gsub('[%z\1-\9\11-\31\128-\255]', '.')
+		print(string.format('S%-3d T%-3d %05.02f%5d %s %s',
+			S, T, time.clock() - t0, len, cmd, s))
+	end
+
+	glue.override(self, 'read', function(self, inherited, buf, maxsz)
+		local sz, err = inherited(self, buf, maxsz)
+		if not sz then return nil, err end
+		P('<', ffi.string(buf, sz))
+		return sz
+	end)
+
+	glue.override(self, 'send', function(self, inherited, buf, maxsz)
+		local sz, err = inherited(self, buf, maxsz)
+		if not sz then return nil, err end
+		P('>', ffi.string(buf, sz))
+		return sz
+	end)
+
+	glue.after(self, 'close', function(self)
+		P('C')
+	end)
+
+	self.debug_hooks_installed = true
 end
 
 --instantiation --------------------------------------------------------------
