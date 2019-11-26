@@ -8,6 +8,7 @@ local glue = require'glue'
 local stream = require'stream'
 local http_headers = require'http_headers'
 local ffi = require'ffi'
+local _ = string.format
 
 local http = {}
 
@@ -177,15 +178,15 @@ function http:send_request_line(method, uri, http_version)
 	assert(http_version == '1.1' or http_version == '1.0')
 	assert(method and method == method:upper())
 	assert(uri)
-	local s = string.format('%s %s HTTP/%s\r\n', method, uri, http_version)
-	self:dbg(s)
-	self:send(s)
+	self:dbg('=>', '%s %s %s', method, uri, http_version)
+	self:send(_('%s %s HTTP/%s\r\n', method, uri, http_version))
 	return true
 end
 
 function http:read_request_line()
 	local method, uri, http_version =
 		self:read_line():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
+	self:dbg('<-', '%s %s %s', method, uri, http_version)
 	check(method, 'invalid request line')
 	return http_version, method, uri
 end
@@ -196,15 +197,19 @@ function http:send_status_line(status, message, http_version)
 	message = message or self.status_messages[status] or ''
 	assert(status and status >= 100 and status <= 999, 'invalid status code')
 	assert(http_version == '1.1' or http_version == '1.0')
-	self:send(string.format('HTTP/%s %d %s\r\n', http_version, status, message))
+	local s = _('HTTP/%s %d %s\r\n', http_version, status, message)
+	self:dbg('=>', '%s %s %s', status, message, http_version)
+	self:send()
 end
 
 function http:read_status_line()
 	local line = self:read_line()
-	local http_version, status = line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)'
+	local http_version, status, status_message
+		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
+	self:dbg('<=', '%s % s %s', status, status_message, http_version)
 	status = tonumber(status)
 	check(http_version and status, 'invalid status line')
-	return http_version, status
+	return http_version, status, status_message
 end
 
 --headers --------------------------------------------------------------------
@@ -232,10 +237,12 @@ function http:send_headers(headers)
 			k, v = self:format_header(k, v)
 			if type(v) == 'table' then --must be sent unfolded.
 				for i,v in ipairs(v) do
-					self:send(string.format('%s: %s\r\n', k, v))
+					self:dbg('->', '%-20s: %s', self.serialize(v))
+					self:send(_('%s: %s\r\n', k, v))
 				end
 			else
-				self:send(string.format('%s: %s\r\n', k, v))
+				self:dbg('->', '%-20s: %s', k, self.serialize(v))
+				self:send(_('%s: %s\r\n', k, v))
 			end
 		end
 	end
@@ -256,6 +263,7 @@ function http:read_headers(rawheaders)
 		end
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
+		self:dbg('<-', '%-20s: %s', name, value)
 		if rawheaders[name] then --headers can be duplicate.
 			rawheaders[name] = rawheaders[name] .. ',' .. value
 		else
@@ -282,29 +290,38 @@ function http:set_body_headers(headers, content, content_size, close)
 end
 
 function http:read_chunks(write_content)
+	local total = 0
 	while true do
 		local line = self:read_line()
-		local size = tonumber(string.gsub(line, ';.*', ''), 16) --size[; extension]
-		--print('CHUNK', line, size)
-		check(size, 'invalid chunk size')
-		if size == 0 then break end --last chunk (trailers not supported)
-		self:read_exactly(size, write_content)
+		local len = tonumber(string.gsub(line, ';.*', ''), 16) --len[; extension]
+		check(len, 'invalid chunk size')
+		total = total + len
+		self:dbg('<<', '%7d bytes (chunk)', len)
+		if len == 0 then break end --last chunk (trailers not supported)
+		self:read_exactly(len, write_content)
 		self:read_line()
 	end
+	self:dbg('<<', '%7d bytes total', total)
 end
 
 function http:send_chunked(read_content)
+	local total = 0
 	while true do
 		local chunk, len = read_content()
 		if chunk then
-			self:send(string.format('%X\r\n', len or #chunk))
+			local len = len or #chunk
+			total = total + len
+			seld:dbg('>>', '%7d bytes (chunk)', len)
+			self:send(_('%X\r\n', len))
 			self:send(chunk, len)
 			self:send'\r\n'
 		else
+			seld:dbg('>>', '%7d bytes (chunk)', 0)
 			self:send'0\r\n\r\n'
 			break
 		end
 	end
+	self:dbg('>>', '%7d bytes total', total)
 end
 
 function http:zlib_decoder(format, write)
@@ -347,6 +364,7 @@ end
 
 function http:send_body(content, content_size, content_encoding, transfer_encoding)
 	if not content then
+		self:dbg('  ', '')
 		return
 	end
 	if content_encoding == 'gzip' or content_encoding == 'deflate' then
@@ -359,15 +377,23 @@ function http:send_body(content, content_size, content_encoding, transfer_encodi
 	else
 		assert(not transfer_encoding, 'invalid transfer-encoding')
 		if type(content) == 'function' then
+			local total = 0
 			while true do
 				local chunk, len = content()
 				if not chunk then break end
+				local len = len or #chunk
+				total = total + len
+				seld:dbg('>>', '%7d bytes total', len)
 				self:send(chunk, len)
 			end
+			self:dbg('>>', '%7d bytes total', total)
 		else
+			local len = content_size or #content
+			seld:dbg('>>', '%7d bytes', len)
 			self:send(content, content_size)
 		end
 	end
+	self:dbg('  ', '')
 end
 
 local function null_write() end
@@ -379,8 +405,11 @@ function http:read_body_to_writer(headers, write, from_server, close_connection)
 	if te and te[#te] == 'chunked' then
 		self:read_chunks(write)
 	elseif headers['content-length'] then
-		self:read_exactly(headers['content-length'], write)
+		local len = headers['content-length']
+		self:dbg('<<', '%7d bytes total', len)
+		self:read_exactly(len, write)
 	elseif from_server and close_connection then
+		self:dbg('<<', '?? bytes (reading until closed)')
 		self:read_until_closed(write)
 	end
 end
@@ -738,63 +767,84 @@ end
 
 --debug hooks ----------------------------------------------------------------
 
+http.dbg = glue.noop
+http.serialize = glue.noop
+
 function http:install_debug_hooks()
 
 	if self.debug_hooks_installed then return end
 	self.debug_hooks_installed = true
 	if not self.debug then return end
 
-	if self.debug.
-		self:dbg(...)
-			print(...)
-		end
-	end
-
-	if not self.debug.stream then return end
-
 	local pp = require'pp'
 	local time = require'time'
 	local loop = require'socketloop'
-	local t0 = time.clock()
+
 	local st, tt = {n = 0}, {n = 0}
-	local function id(s, t)
-		if not t[s] then t.n = t.n + 1; t[s] = t.n; end
+	local function id(s, t, anchor)
+		if not t[s] then
+			t.n = t.n + 1
+			t[s] = t.n
+			t[#t+1] = anchor --so the address doesn't get recycled
+		end
 		return t[s]
 	end
-	local P = function(cmd, s)
+	local t0 = time.clock()
+
+	local function D(cmd, s, len)
 		local sock = self:getsocket()
 		local S = tostring(sock)
 		local S = S:match('tcp{client}: (%x+)') or S:match'0x(%x+)'
-		local S = id(S, st)
-		local T = tostring(loop.current())
+		local S = id(S, st, sock)
+		local thread = loop.current()
+		local T = tostring(thread)
 		local T = T:match'0x(%x+)'
-		local T = id(T, tt)
-		local len = s and #s or 0
-		local s = s and s
-			:gsub('\r\n', '\n'..(' '):rep(23))
-			:gsub('\n%s*$', '')
-			:gsub('[%z\1-\9\11-\31\128-\255]', '.')
-		print(string.format('S%-3d T%-3d %05.02f%5d %s %s',
-			S, T, time.clock() - t0, len, cmd, s))
+		local T = id(T, tt, thread)
+		local dt = time.clock() - t0
+		local len = len and tostring(len) or ''
+		print(_('S%-3d T%-3d %05.02f%5s %s %s', S, T, dt, len, cmd, s))
 	end
 
-	glue.override(self, 'read', function(self, inherited, buf, maxsz)
-		local sz, err = inherited(self, buf, maxsz)
-		if not sz then return nil, err end
-		P('<', ffi.string(buf, sz))
-		return sz
-	end)
+	if self.debug.protocol then
 
-	glue.override(self, 'send', function(self, inherited, buf, maxsz)
-		local sz, err = inherited(self, buf, maxsz)
-		if not sz then return nil, err end
-		P('>', ffi.string(buf, sz))
-		return sz
-	end)
+		self.serialize = pp.format
 
-	glue.after(self, 'close', function(self)
-		P('C')
-	end)
+		function self:dbg(cmd, ...)
+			D(cmd, _(...))
+		end
+
+	end
+
+	if self.debug.stream then
+
+		local P = function(cmd, s)
+			local len = s and #s
+			local s = s and s
+				:gsub('\r\n', '\n'..(' '):rep(23))
+				:gsub('\n%s*$', '')
+				:gsub('[%z\1-\9\11-\31\128-\255]', '.')
+			D(cmd, s, len)
+		end
+
+		glue.override(self, 'read', function(self, inherited, buf, maxsz)
+			local sz, err = inherited(self, buf, maxsz)
+			if not sz then return nil, err end
+			P('< ', ffi.string(buf, sz))
+			return sz
+		end)
+
+		glue.override(self, 'send', function(self, inherited, buf, maxsz)
+			local sz, err = inherited(self, buf, maxsz)
+			if not sz then return nil, err end
+			P(' >', ffi.string(buf, sz))
+			return sz
+		end)
+
+		glue.after(self, 'close', function(self)
+			P('CC')
+		end)
+	end
+
 end
 
 --instantiation --------------------------------------------------------------
@@ -804,6 +854,7 @@ function http:new(t)
 	self.__index = super
 	setmetatable(self, self)
 	self:create_linebuffer()
+	self:dbg('CO', '%s %d', self.host, self.port)
 	return self
 end
 

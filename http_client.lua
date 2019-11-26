@@ -289,7 +289,7 @@ for i=1,1 do
 			--host = 'mokingburd.de',
 			--host = 'www.google.com', https = true,
 			receive_content = 'string',
-			debug = true,
+			debug = {protocol = true},
 			max_line_size = 1024,
 		}
 		if res then
