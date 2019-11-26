@@ -7,7 +7,7 @@ local http = require'http'
 local uri = require'uri'
 local time = require'time'
 local glue = require'glue'
---http.zlib = require'zlib'
+http.zlib = require'zlib'
 local attr = glue.attr
 
 local push = table.insert
@@ -284,8 +284,8 @@ local n = 0
 for i=1,1 do
 	loop.newthread(function()
 		local res, req = client:request{
-			host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
-			--host = 'luapower.com', uri = '/', https = true,
+			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
+			host = 'luapower.com', uri = '/', https = true,
 			--host = 'mokingburd.de',
 			--host = 'www.google.com', https = true,
 			receive_content = 'string',

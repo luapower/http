@@ -48,6 +48,14 @@ function http:protect(method)
 	end
 end
 
+--debugging ------------------------------------------------------------------
+
+function http:deb(topic, ...)
+	if not self.debug then return end
+	if not self.debug[topic] then return end
+	print(...)
+end
+
 --low-level API to implement -------------------------------------------------
 
 function http:close()           error'not implemented' end
@@ -65,7 +73,7 @@ function http:read_exactly(n, write)
 		write(buf, sz)
 		n = n - sz
 	end
-	print('READ_EXACTLY', n0, n)
+	--print('READ_EXACTLY', n0, n)
 end
 
 function http:read_line()
@@ -169,7 +177,9 @@ function http:send_request_line(method, uri, http_version)
 	assert(http_version == '1.1' or http_version == '1.0')
 	assert(method and method == method:upper())
 	assert(uri)
-	self:send(string.format('%s %s HTTP/%s\r\n', method, uri, http_version))
+	local s = string.format('%s %s HTTP/%s\r\n', method, uri, http_version)
+	self:dbg(s)
+	self:send(s)
 	return true
 end
 
@@ -275,7 +285,7 @@ function http:read_chunks(write_content)
 	while true do
 		local line = self:read_line()
 		local size = tonumber(string.gsub(line, ';.*', ''), 16) --size[; extension]
-		print('CHUNK', line, size)
+		--print('CHUNK', line, size)
 		check(size, 'invalid chunk size')
 		if size == 0 then break end --last chunk (trailers not supported)
 		self:read_exactly(size, write_content)
@@ -675,7 +685,7 @@ function http:bind_luasocket(sock)
 
 	function self:read(buf, sz)
 		local s, err, p = sock:receive(sz, nil, true)
-		print(sz, '->', s and #s, err, p and #p)
+		--print(sz, '->', s and #s, err, p and #p)
 		if not s then return nil, err end
 		assert(#s <= sz)
 		ffi.copy(buf, s, #s)
@@ -730,7 +740,17 @@ end
 
 function http:install_debug_hooks()
 
-	if not self.debug or self.debug_hooks_installed then return end
+	if self.debug_hooks_installed then return end
+	self.debug_hooks_installed = true
+	if not self.debug then return end
+
+	if self.debug.
+		self:dbg(...)
+			print(...)
+		end
+	end
+
+	if not self.debug.stream then return end
 
 	local pp = require'pp'
 	local time = require'time'
@@ -775,8 +795,6 @@ function http:install_debug_hooks()
 	glue.after(self, 'close', function(self)
 		P('C')
 	end)
-
-	self.debug_hooks_installed = true
 end
 
 --instantiation --------------------------------------------------------------
