@@ -110,12 +110,14 @@ local function test_server()
 				i = i + 1
 				return i == 1 and '123' or i == 2 and '4567890' or nil
 			end
-			server:send_response(req, {
+			local res = server:make_response(req, {
 				content = gen_content,
 				--close = true,
 				compress = true,
 				content_type = 'text/plain',
 			})
+			local ok, err = server:send_response(res)
+			if not ok then print(err) end
 		end
 	end
 end

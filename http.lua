@@ -17,16 +17,22 @@ local http = {}
 --raise protocol errors with check() instead of assert() or error() which
 --makes functions wrapped with http:protect() return nil,err for those errors.
 
-local protocol_error = {}
+local error_class = {
+	protocol = {id = 'protocol_error'},
+	io = {id = 'io_error'},
+}
 
-local function check(v, err)
-	if v then return v end
-	error(setmetatable({message = err}, protocol_error))
+local function checker(error_class, v, err)
+	return function(v, err)
+		if v then return v end
+		error(setmetatable({message = err}, error_class))
+	end
 end
-http.check = check
+local check = checker(error_class.protocol)
+local check_io = checker(error_class.io)
 
 local function catch(err)
-	if getmetatable(err) ~= protocol_error then
+	if type(err) == 'string' then
 		return debug.traceback('\n'..err)
 	else
 		return err
@@ -36,8 +42,9 @@ local function pass(self, ok, ...)
 	if ok then return ... end
 	self:close()
 	local err = ...
-	if getmetatable(err) == protocol_error then
-		return nil, err.message or 'protocol error'
+	local error_class = getmetatable(err)
+	if error_class then
+		return nil, err.message or error_class.id, error_class.id
 	else
 		error(err, 2)
 	end
@@ -47,14 +54,6 @@ function http:protect(method)
 	self[method] = function(self, ...)
 		return pass(self, xpcall(f, catch, self, ...))
 	end
-end
-
---debugging ------------------------------------------------------------------
-
-function http:deb(topic, ...)
-	if not self.debug then return end
-	if not self.debug[topic] then return end
-	print(...)
 end
 
 --low-level API to implement -------------------------------------------------
@@ -70,15 +69,14 @@ function http:read_exactly(n, write)
 	local n0 = n
 	while n > 0 do
 		local buf, sz = read(n)
-		check(buf, sz)
+		check_io(buf, sz)
 		write(buf, sz)
 		n = n - sz
 	end
-	--print('READ_EXACTLY', n0, n)
 end
 
 function http:read_line()
-	return check(self.linebuffer.readline())
+	return check_io(self.linebuffer.readline())
 end
 
 function http:read_until_closed(write_content)
@@ -87,7 +85,7 @@ function http:read_until_closed(write_content)
 		local buf, sz = read(1/0)
 		if not buf then
 			if sz == 'closed' then return end
-			check(nil, sz)
+			check_io(nil, sz)
 		end
 		write_content(buf, sz)
 	end
@@ -173,7 +171,6 @@ http.status_messages = {
 	[511] = 'Network Authentication Required',
 }
 
---NOTE: http_version must be '1.0' or '1.1'
 function http:send_request_line(method, uri, http_version)
 	assert(http_version == '1.1' or http_version == '1.0')
 	assert(method and method == method:upper())
@@ -191,10 +188,10 @@ function http:read_request_line()
 	return http_version, method, uri
 end
 
---NOTE: http_version must be '1.0' or '1.1'.
---NOTE: the message must not contain newlines.
 function http:send_status_line(status, message, http_version)
-	message = message or self.status_messages[status] or ''
+	message = message
+		and message:gsub('[\r?\n]', ' ')
+		or self.status_messages[status] or ''
 	assert(status and status >= 100 and status <= 999, 'invalid status code')
 	assert(http_version == '1.1' or http_version == '1.0')
 	local s = _('HTTP/%s %d %s\r\n', http_version, status, message)
@@ -291,37 +288,41 @@ end
 
 function http:read_chunks(write_content)
 	local total = 0
+	local chunk_num = 0
 	while true do
+		chunk_num = chunk_num + 1
 		local line = self:read_line()
 		local len = tonumber(string.gsub(line, ';.*', ''), 16) --len[; extension]
 		check(len, 'invalid chunk size')
 		total = total + len
-		self:dbg('<<', '%7d bytes (chunk)', len)
+		self:dbg('<<', '%7d bytes; chunk %d', len, chunk_num)
 		if len == 0 then break end --last chunk (trailers not supported)
 		self:read_exactly(len, write_content)
 		self:read_line()
 	end
-	self:dbg('<<', '%7d bytes total', total)
+	self:dbg('<<', '%7d bytes in %d chunks', total, chunk_num)
 end
 
 function http:send_chunked(read_content)
 	local total = 0
+	local chunk_num = 0
 	while true do
+		chunk_num = chunk_num + 1
 		local chunk, len = read_content()
 		if chunk then
 			local len = len or #chunk
 			total = total + len
-			seld:dbg('>>', '%7d bytes (chunk)', len)
+			seld:dbg('>>', '%7d bytes; chunk %d', len, chunk_num)
 			self:send(_('%X\r\n', len))
 			self:send(chunk, len)
 			self:send'\r\n'
 		else
-			seld:dbg('>>', '%7d bytes (chunk)', 0)
+			seld:dbg('>>', '%7d bytes; chunk %d', 0, chunk_num)
 			self:send'0\r\n\r\n'
 			break
 		end
 	end
-	self:dbg('>>', '%7d bytes total', total)
+	self:dbg('>>', '%7d bytes in %d chunks', total, chunk_num)
 end
 
 function http:zlib_decoder(format, write)
@@ -498,8 +499,8 @@ function http:read_response(req)
 	self:read_headers(res.rawheaders)
 	res.headers = self:parsed_headers(res.rawheaders)
 
-	res.close = req.close
-		or (res.headers['connection'] and res.headers['connection'].close)
+	res.close =
+		(res.headers['connection'] and res.headers['connection'].close)
 		or res.http_version == '1.0'
 
 	local receive_content = req.receive_content
@@ -516,7 +517,7 @@ function http:read_response(req)
 	res.content, res.content_size =
 		self:read_body(res.headers, receive_content, true, res.close)
 
-	if res.close then
+	if req.close or res.close then
 		self:close()
 	end
 
@@ -541,6 +542,7 @@ function http:read_request(receive_content)
 	req.rawheaders = {}
 	self:read_headers(req.rawheaders)
 	req.headers = self:parsed_headers(req.rawheaders)
+	req.close = req.headers['connection'] and req.headers['connection'].close
 	req.content, req.content_size = self:read_body(req.headers, receive_content)
 	return req
 end
@@ -652,14 +654,13 @@ function http:accept_content_type(req, res, available)
 	end
 end
 
-function http:send_response(req, t)
+function http:make_response(req, t)
 	local res = {}
 	res.headers = {}
 
 	res.http_version = t.http_version or req.http_version
 
-	res.close = t.close
-		or (req.headers['connection'] and req.headers['connection'].close)
+	res.close = t.close or req.close
 	if res.close then
 		res.headers['connection'] = 'close'
 	end
@@ -691,17 +692,19 @@ function http:send_response(req, t)
 	self:set_body_headers(res.headers, res.content, res.content_size, res.close)
 	glue.update(res.headers, t.headers)
 
+	return res
+end
+
+function http:send_response(res)
 	self:send_status_line(res.status, res.status_message, res.http_version)
 	self:send_headers(res.headers)
 	self:send_body(res.content, res.content_size,
 		res.headers['content-encoding'],
 		res.headers['transfer-encoding'])
-
 	if res.close then
 		self:close()
 	end
-
-	return status
+	return true
 end
 http:protect'send_response'
 
@@ -714,7 +717,6 @@ function http:bind_luasocket(sock)
 
 	function self:read(buf, sz)
 		local s, err, p = sock:receive(sz, nil, true)
-		--print(sz, '->', s and #s, err, p and #p)
 		if not s then return nil, err end
 		assert(#s <= sz)
 		ffi.copy(buf, s, #s)
@@ -729,6 +731,7 @@ function http:bind_luasocket(sock)
 
 	function self:close()
 		sock:close()
+		self.closed = true
 	end
 
 	self:install_debug_hooks()
@@ -791,7 +794,7 @@ function http:install_debug_hooks()
 	end
 	local t0 = time.clock()
 
-	local function D(cmd, s, len)
+	local function D(cmd, s)
 		local sock = self:getsocket()
 		local S = tostring(sock)
 		local S = S:match('tcp{client}: (%x+)') or S:match'0x(%x+)'
@@ -801,8 +804,7 @@ function http:install_debug_hooks()
 		local T = T:match'0x(%x+)'
 		local T = id(T, tt, thread)
 		local dt = time.clock() - t0
-		local len = len and tostring(len) or ''
-		print(_('S%-3d T%-3d %05.02f%5s %s %s', S, T, dt, len, cmd, s))
+		print(_('S%-3d T%-3d %5.2fs %s %s', S, T, dt, cmd, s))
 	end
 
 	if self.debug.protocol then
@@ -818,18 +820,18 @@ function http:install_debug_hooks()
 	if self.debug.stream then
 
 		local P = function(cmd, s)
-			local len = s and #s
+			local len = s and _('%5d', #s) or '     '
 			local s = s and s
-				:gsub('\r\n', '\n'..(' '):rep(23))
+				:gsub('\r\n', '\n'..(' '):rep(25))
 				:gsub('\n%s*$', '')
 				:gsub('[%z\1-\9\11-\31\128-\255]', '.')
-			D(cmd, s, len)
+			D(cmd, _('%s %s', len, s))
 		end
 
 		glue.override(self, 'read', function(self, inherited, buf, maxsz)
 			local sz, err = inherited(self, buf, maxsz)
 			if not sz then return nil, err end
-			P('< ', ffi.string(buf, sz))
+			P(' <', ffi.string(buf, sz))
 			return sz
 		end)
 
