@@ -234,11 +234,11 @@ function http:send_headers(headers)
 			k, v = self:format_header(k, v)
 			if type(v) == 'table' then --must be sent unfolded.
 				for i,v in ipairs(v) do
-					self:dbg('->', '%-20s: %s', self.serialize(v))
+					self:dbg('->', '%-20s: %s', v)
 					self:send(_('%s: %s\r\n', k, v))
 				end
 			else
-				self:dbg('->', '%-20s: %s', k, self.serialize(v))
+				self:dbg('->', '%-20s: %s', k, v)
 				self:send(_('%s: %s\r\n', k, v))
 			end
 		end
@@ -771,7 +771,8 @@ end
 --debug hooks ----------------------------------------------------------------
 
 http.dbg = glue.noop
-http.serialize = glue.noop
+
+local st, tt
 
 function http:install_debug_hooks()
 
@@ -783,7 +784,8 @@ function http:install_debug_hooks()
 	local time = require'time'
 	local loop = require'socketloop'
 
-	local st, tt = {n = 0}, {n = 0}
+	st = st or {n = 0}
+	tt = tt or {n = 0}
 	local function id(s, t, anchor)
 		if not t[s] then
 			t.n = t.n + 1
@@ -808,8 +810,6 @@ function http:install_debug_hooks()
 	end
 
 	if self.debug.protocol then
-
-		self.serialize = pp.format
 
 		function self:dbg(cmd, ...)
 			D(cmd, _(...))
@@ -852,9 +852,7 @@ end
 --instantiation --------------------------------------------------------------
 
 function http:new(t)
-	local self, super = t or {}, self
-	self.__index = super
-	setmetatable(self, self)
+	local self = glue.object(self, {}, t)
 	self:create_linebuffer()
 	self:dbg('CO', '%s %d', self.host, self.port)
 	return self

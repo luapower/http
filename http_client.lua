@@ -8,8 +8,8 @@ local uri = require'uri'
 local time = require'time'
 local glue = require'glue'
 http.zlib = require'zlib'
-local attr = glue.attr
 
+local attr = glue.attr
 local push = table.insert
 local pull = function(t)
 	return table.remove(t, 1)
@@ -17,7 +17,7 @@ end
 
 local client = {
 	max_conn = 50,
-	max_conn_per_target = 20, --a target is the tuple (host, port, client_ip)
+	max_conn_per_target = 20,
 	max_pipelined_requests = 10,
 	socket_timeout = 5,
 	client_ips = {},
@@ -31,6 +31,11 @@ function client:dbg(...)
 	if not self.debug then return end
 	print(string.format('%11s', ''), ...)
 end
+
+--targets --------------------------------------------------------------------
+
+--A target is a combination of (host, port, client_ip) on which one or more
+--http connections can be created subject to per-target limits.
 
 function client:assign_client_ip(host, port)
 	if #self.client_ips == 0 then
@@ -67,19 +72,20 @@ function client:target(t)
 	return target
 end
 
-function client:count_conn(target)
-	self.conn_count = self.conn_count + 1
-	target.conn_count = (target.conn_count or 0) + 1
-	self:dbg('C++')
+--connections ----------------------------------------------------------------
+
+function client:inc_conn_count(target, n)
+	n = n or 1
+	self.conn_count = self.conn_count + n
+	target.conn_count = (target.conn_count or 0) + n
+	self:dbg('C'..(n > 0 and '++' or '--'))
 end
 
-function client:discount_conn(target)
-	self.conn_count = self.conn_count - 1
-	target.conn_count = target.conn_count - 1
-	self:dbg('C--')
+function client:dec_conn_count(target)
+	self:inc_conn_count(target, -1)
 end
 
-function client:push_ready_conn(target, http, pipelined)
+function client:push_ready_conn(target, http)
 	push(attr(target, 'ready'), http)
 	self:dbg('+READY')
 end
@@ -88,19 +94,6 @@ function client:pull_ready_conn(target)
 	local http = target.ready and pull(target.ready)
 	if http then self:dbg('-READY') end
 	return http
-end
-
-function client:push_wait_response_thread(http, thread, req)
-	push(attr(http, 'wait_response_threads'), {thread, req})
-	self:dbg('+WAIT_RESPONSE')
-end
-
-function client:pull_wait_response_thread(http)
-	local queue = http.wait_response_threads
-	local t = queue and pull(queue)
-	if not t then return end
-	self:dbg('-WAIT_RESPONSE')
-	return t[1], t[2] --thread, req
 end
 
 function client:push_wait_conn_thread(thread, target)
@@ -136,23 +129,9 @@ function client:_can_connect_now(target)
 	if target_conn_count >= target_max_conn then return false end
 	return true
 end
-
 function client:can_connect_now(target)
 	local can = self:_can_connect_now(target)
 	self:dbg('CAN_CONNECT_NOW', can)
-	return can
-end
-
-function client:_can_pipeline_new_requests(http, target, req)
-	if req.close then return false end
-	local pr_count = http.waiting_request_count or 0
-	local max_pr = target.max_pipelined_requests or self.max_pipelined_requests
-	return pr_count < max_pr
-end
-
-function client:can_pipeline_new_requests(http, target, req)
-	local can = client:_can_pipeline_new_requests(http, target, req)
-	self:dbg('CAN_PIPELINE_NEW_REQUESTS', can)
 	return can
 end
 
@@ -160,18 +139,19 @@ function client:connect_now(target)
 	local host, port, client_ip = target()
 	local sock, err = loop.tcp(client_ip)
 	if not sock then return nil, err end
-	self:count_conn(target)
+	self:inc_conn_count(target)
 	local ok, err = sock:connect(host, port)
 	self:dbg('CONNECT', ok, err)
 	if not ok then
-		self:discount_conn(target)
+		self:dec_conn_count(target)
 		return nil, err
 	end
 	glue.after(sock, 'close', function()
-		self:discount_conn(target)
+		self:dec_conn_count(target)
 		self:connect_and_resume_next_wait_conn_thread()
 	end)
 	local http = http:new(target.http_args)
+	self:dbg('HTTP', http)
 	http:bind_luasocket(sock)
 	if http.https then
 		local ok, err = http:bind_luasec(sock, host)
@@ -185,6 +165,16 @@ function client:wait_conn(target)
 	self:push_wait_conn_thread(loop.current(), target)
 	self:dbg('WAIT_CONN')
 	return loop.suspend() --http, err
+end
+
+function client:get_conn(target)
+	local http, err = self:pull_ready_conn(target)
+	if http then return http end
+	if self:can_connect_now(target) then
+		return self:connect_now(target)
+	else
+		return self:wait_conn(target)
+	end
 end
 
 function client:connect_and_resume_next_wait_conn_thread()
@@ -202,16 +192,32 @@ function client:resume_matching_wait_conn_thread(target, http)
 	return true
 end
 
-function client:wait_read_response(http, req)
-	self:push_wait_response_thread(http, loop.current(), req)
-	self:dbg('WAIT_READ_RESPONSE')
-	loop.suspend()
+function client:_can_pipeline_new_requests(http, target, req)
+	if req.close then return false end
+	local pr_count = http.waiting_request_count or 0
+	local max_pr = target.max_pipelined_requests or self.max_pipelined_requests
+	return pr_count < max_pr
+end
+function client:can_pipeline_new_requests(http, target, req)
+	local can = self:_can_pipeline_new_requests(http, target, req)
+	self:dbg('CAN_PIPELINE_NEW_REQUESTS', can)
+	return can
 end
 
-function client:resume_next_read_response(http)
-	local thread = self:pull_wait_response_thread(http)
+--pipelining -----------------------------------------------------------------
+
+function client:push_wait_response_thread(http, thread)
+	push(attr(http, 'wait_response_threads'), thread)
+	http.wait_response_count = (http.wait_response_count or 0) + 1
+	self:dbg('+WAIT_RESPONSE')
+end
+
+function client:pull_wait_response_thread(http)
+	local queue = http.wait_response_threads
+	local thread = queue and pull(queue)
 	if not thread then return end
-	loop.resume(thread)
+	self:dbg('-WAIT_RESPONSE')
+	return thread
 end
 
 function client:read_response_now(http, req)
@@ -221,19 +227,7 @@ function client:read_response_now(http, req)
 	return res, err, errtype
 end
 
-function client:read_or_wait_read_response(http, req)
-	if http.reading_response then
-		self:wait_read_response(http, req)
-	end
-	local res, err, errtype = self:read_response_now(http, req)
-	if not res then return nil, err, errtype end
-	self:resume_next_read_response(http)
-	return res
-end
-
-	--self:dbg('RESUME_READ_RESPONSE')
-	--local res, err, errtype = self:read_response_now(http, req)
-	--loop.resume(thread, res, err, errtype)
+--redirects ------------------------------------------------------------------
 
 function client:redirect_request_args(t, req, res)
 	local location = assert(res.redirect_location, 'no location')
@@ -260,24 +254,25 @@ function client:redirect_request_args(t, req, res)
 	}
 end
 
+--request call ---------------------------------------------------------------
+
 function client:request(t)
 	local target = self:target(t)
 
-	local http, err = self:pull_ready_conn(target)
-	if not http then
-		if self:can_connect_now(target) then
-			http, err = self:connect_now(target)
-		else
-			http, err = self:wait_conn(target)
-		end
-	end
+	local http, err = self:get_conn(target)
 	if not http then return nil, err end
 
 	local req = http:make_request(t)
 	local ok, err = http:send_request(req)
 	if not ok then return nil, err, req end
 
-	http.waiting_request_count = (http.waiting_request_count or 0) + 1
+	local waiting_response
+	if http.reading_response then
+		self:push_wait_response_thread(http, loop.current())
+		waiting_response = true
+	else
+		http.reading_response = true
+	end
 
 	local taken
 	if self:can_pipeline_new_requests(http, target, req) then
@@ -287,20 +282,34 @@ function client:request(t)
 		end
 	end
 
-	local res, err = self:read_or_wait_read_response(http, req)
-	if not res then return nil, err, req end
+	if waiting_response then
+		loop.suspend()
+	end
 
-	http.waiting_request_count = http.waiting_request_count - 1
+	local res, err, errtype = self:read_response_now(http, req)
+
+	if not res then return nil, err, errtype end
 
 	if not taken and not http.closed then
-		self:push_ready_conn(target, http)
+		if not self:resume_matching_wait_conn_thread(target, http) then
+			self:push_ready_conn(target, http)
+		end
+	end
+
+	if not http.closed then
+		local thread = self:pull_wait_response_thread(http)
+		if thread then
+			loop.resume(thread)
+		end
 	end
 
 	return res, req
 end
 
+--instantiation --------------------------------------------------------------
+
 function client:new(t)
-	local self = glue.object(self, t)
+	local self = glue.object(self, {}, t)
 	self.conn_count = 0
 	self.t2 = glue.tuples(2)
 	self.t3 = glue.tuples(3)
@@ -327,6 +336,8 @@ end
 
 local client = client:new()
 client.max_conn = 1
+client.max_pipelined_requests = 0
+--client.debug = false
 local n = 0
 for i=1,2 do
 	loop.newthread(function()
@@ -336,8 +347,9 @@ for i=1,2 do
 			--host = 'mokingburd.de',
 			--host = 'www.google.com', https = true,
 			receive_content = 'string',
-			debug = {protocol = true, stream = false},
+			debug = {protocol = false, stream = false},
 			max_line_size = 1024,
+			--close = true,
 		}
 		if res then
 			n = n + #res.content
