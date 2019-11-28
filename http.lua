@@ -10,7 +10,7 @@ local http_headers = require'http_headers'
 local ffi = require'ffi'
 local _ = string.format
 
-local http = {}
+local http = {type = 'http_connection'}
 
 --error handling -------------------------------------------------------------
 
@@ -207,7 +207,7 @@ function http:read_status_line()
 	local line = self:read_line()
 	local http_version, status, status_message
 		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
-	self:dbg('<=', '%s % s %s', status, status_message, http_version)
+	self:dbg('<=', '%s %s %s', status, status_message, http_version)
 	status = tonumber(status)
 	check(http_version and status, 'invalid status line')
 	return http_version, status, status_message
@@ -438,7 +438,7 @@ end
 --client-side ----------------------------------------------------------------
 
 function http:make_request(t)
-	local req = {http = self}
+	local req = {http = self, type = 'http_request'}
 	req.http_version = t.http_version or '1.1'
 	req.method = t.method or 'GET'
 	req.uri = t.uri or '/'
@@ -588,8 +588,8 @@ function http:negotiate_content_encoding(req, compress)
 	return allow_identity and 'identity' or nil
 end
 
-function http:accept_content_encoding(req, res, compress)
-	local content_encoding = self:negotiate_content_encoding(req, compress)
+function http:accept_content_encoding(res, compress)
+	local content_encoding = self:negotiate_content_encoding(res.request, compress)
 	if not content_encoding then
 		return self:no_body(res, 406) --not acceptable
 	elseif content_encoding ~= 'identity' then
@@ -598,8 +598,8 @@ function http:accept_content_encoding(req, res, compress)
 	end
 end
 
-function http:allow_method(req, res, allowed_methods)
-	if not allowed_methods[req.method] then
+function http:allow_method(res, allowed_methods)
+	if not allowed_methods[res.request.method] then
 		res.headers['allow'] = allowed_methods
 		return self:no_body(res, 405) --method not allowed
 	else
@@ -648,8 +648,8 @@ function http:negotiate_content_type(req, available)
 	return false
 end
 
-function http:accept_content_type(req, res, available)
-	local content_type = self:negotiate_content_type(req, available)
+function http:accept_content_type(res, available)
+	local content_type = self:negotiate_content_type(res.request, available)
 	if not content_type then
 		return self:no_body(res, 406) --not acceptable
 	else
@@ -659,7 +659,7 @@ function http:accept_content_type(req, res, available)
 end
 
 function http:make_response(req, t)
-	local res = {}
+	local res = {http = self, request = req, type = 'http_response'}
 	res.headers = {}
 
 	res.http_version = t.http_version or req.http_version
@@ -676,15 +676,15 @@ function http:make_response(req, t)
 		res.status = 200
 	end
 
-	if t.allowed_methods and not self:allow_method(req, res, t.allowed_methods) then
+	if t.allowed_methods and not self:allow_method(res, t.allowed_methods) then
 		return false
 	end
-	if not self:accept_content_encoding(req, res, t.compress) then
+	if not self:accept_content_encoding(res, t.compress) then
 		return false
 	end
 	if t.content_type or t.content_types then
 		local content_types = t.content_types or {t.content_type}
-		if not self:accept_content_type(req, res, content_types) then
+		if not self:accept_content_type(res, content_types) then
 			return false
 		end
 	end
@@ -714,6 +714,8 @@ http:protect'send_response'
 
 --luasocket binding ----------------------------------------------------------
 
+http.dbg = glue.noop
+
 function http:bind_luasocket(sock)
 
 	function self:getsocket() return sock end
@@ -738,7 +740,6 @@ function http:bind_luasocket(sock)
 		self.closed = true
 	end
 
-	self:install_debug_hooks()
 end
 
 --luasec binding -------------------------------------------------------------
@@ -772,91 +773,14 @@ function http:bind_luasec(sock, host)
 	return true
 end
 
---debug hooks ----------------------------------------------------------------
-
-http.dbg = glue.noop
-
-local st, tt
-
-function http:install_debug_hooks()
-
-	if self.debug_hooks_installed then return end
-	self.debug_hooks_installed = true
-	if not self.debug then return end
-
-	local pp = require'pp'
-	local time = require'time'
-	local loop = require'socketloop'
-
-	st = st or {n = 0}
-	tt = tt or {n = 0}
-	local function id(s, t, anchor)
-		if not t[s] then
-			t.n = t.n + 1
-			t[s] = t.n
-			t[#t+1] = anchor --so the address doesn't get recycled
-		end
-		return t[s]
-	end
-	local t0 = time.clock()
-
-	local function D(cmd, s)
-		local sock = self:getsocket()
-		local S = tostring(sock)
-		local S = S:match('tcp{client}: (%x+)') or S:match'0x(%x+)'
-		local S = id(S, st, sock)
-		local thread = loop.current()
-		local T = tostring(thread)
-		local T = T:match'0x(%x+)'
-		local T = id(T, tt, thread)
-		local dt = time.clock() - t0
-		print(_('S%-3d T%-3d %5.2fs %s %s', S, T, dt, cmd, s))
-	end
-
-	if self.debug.protocol then
-
-		function self:dbg(cmd, ...)
-			D(cmd, _(...))
-		end
-
-	end
-
-	if self.debug.stream then
-
-		local P = function(cmd, s)
-			local len = s and _('%5d', #s) or '     '
-			local s = s and s
-				:gsub('\r\n', '\n'..(' '):rep(25))
-				:gsub('\n%s*$', '')
-				:gsub('[%z\1-\9\11-\31\128-\255]', '.')
-			D(cmd, _('%s %s', len, s))
-		end
-
-		glue.override(self, 'read', function(self, inherited, buf, maxsz)
-			local sz, err = inherited(self, buf, maxsz)
-			if not sz then return nil, err end
-			P(' <', ffi.string(buf, sz))
-			return sz
-		end)
-
-		glue.override(self, 'send', function(self, inherited, buf, maxsz)
-			local sz, err = inherited(self, buf, maxsz)
-			if not sz then return nil, err end
-			P(' >', ffi.string(buf, sz))
-			return sz
-		end)
-
-		glue.after(self, 'close', function(self)
-			P('CC')
-		end)
-	end
-
-end
-
 --instantiation --------------------------------------------------------------
 
 function http:new(t)
 	local self = glue.object(self, {}, t)
+	if self.debug then
+		local dbg = require'http_debug'
+		dbg:install_to_http(self)
+	end
 	self:create_linebuffer()
 	self:dbg('CO', '%s %d', self.host, self.port)
 	return self

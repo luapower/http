@@ -2,6 +2,8 @@
 --async http(s) downloader.
 --Written by Cosmin Apreutesei. Public Domain.
 
+if not ... then require'http_client_test'; return end
+
 local loop = require'socketloop'
 local http = require'http'
 local uri = require'uri'
@@ -9,6 +11,7 @@ local time = require'time'
 local glue = require'glue'
 http.zlib = require'zlib'
 
+local _ = string.format
 local attr = glue.attr
 local push = table.insert
 local pull = function(t)
@@ -16,6 +19,7 @@ local pull = function(t)
 end
 
 local client = {
+	type = 'http_client',
 	max_conn = 50,
 	max_conn_per_target = 20,
 	max_pipelined_requests = 10,
@@ -24,13 +28,9 @@ local client = {
 	max_retries = 0,
 	user_agent = 'Mozilla/5.0 (Windows NT 5.1)',
 	max_redirects = 20,
-	debug = true,
 }
 
-function client:dbg(...)
-	if not self.debug then return end
-	print(string.format('%11s', ''), ...)
-end
+client.dbg = glue.noop
 
 --targets --------------------------------------------------------------------
 
@@ -56,7 +56,9 @@ function client:target(t)
 	local client_ip = t.client_ip or self:assign_client_ip(host, port)
 	local target = self.t3(host, port, client_ip)
 	if not target.http_args then
+		target.type = 'http_target'
 		target.http_args = {
+			target = target,
 			host = host,
 			port = port,
 			client_ip = client_ip,
@@ -76,9 +78,10 @@ end
 
 function client:inc_conn_count(target, n)
 	n = n or 1
-	self.conn_count = self.conn_count + n
+	self.conn_count = (self.conn_count or 0) + n
 	target.conn_count = (target.conn_count or 0) + n
-	self:dbg('C'..(n > 0 and '++' or '--'))
+	self:dbg(target, (n > 0 and '+' or '-')..'CONN_COUNT', '%s=%d, total=%d',
+		target, target.conn_count, self.conn_count)
 end
 
 function client:dec_conn_count(target)
@@ -87,27 +90,29 @@ end
 
 function client:push_ready_conn(target, http)
 	push(attr(target, 'ready'), http)
-	self:dbg('+READY')
+	self:dbg(target, '+READY', '%s', http)
 end
 
 function client:pull_ready_conn(target)
 	local http = target.ready and pull(target.ready)
-	if http then self:dbg('-READY') end
+	if not http then return end
+	self:dbg(target, '-READY', '%s', http)
 	return http
 end
 
 function client:push_wait_conn_thread(thread, target)
 	local queue = attr(self, 'wait_conn_queue')
 	push(queue, {thread, target})
-	self:dbg('+WAIT_CONN')
+	self:dbg(target, '+WAIT_CONN', '%s %s', thread, target)
 end
 
 function client:pull_wait_conn_thread()
 	local queue = self.wait_conn_queue
 	local t = queue and pull(queue)
 	if not t then return end
-	self:dbg('-WAIT_CONN')
-	return t[1], t[2] --thread, target
+	local thread, target = t[1], t[2]
+	self:dbg(target, '-WAIT_CONN', '-> %s %s', target, thread)
+	return thread, target
 end
 
 function client:pull_matching_wait_conn_thread(target)
@@ -116,14 +121,15 @@ function client:pull_matching_wait_conn_thread(target)
 	for i,t in ipairs(queue) do
 		if t[2] == target then
 			table.remove(queue, i)
-			self:dbg('-WAIT_CONN/TARGET')
-			return t[1] --thread
+			local thread = t[1]
+			self:dbg(target, '-MATCHING_WAIT_CONN', '%s -> %s', target, thread)
+			return thread
 		end
 	end
 end
 
 function client:_can_connect_now(target)
-	if self.conn_count >= self.max_conn then return false end
+	if (self.conn_count or 0) >= self.max_conn then return false end
 	local target_conn_count = target.conn_count or 0
 	local target_max_conn = target.max_conn or self.max_conn_per_target
 	if target_conn_count >= target_max_conn then return false end
@@ -131,7 +137,7 @@ function client:_can_connect_now(target)
 end
 function client:can_connect_now(target)
 	local can = self:_can_connect_now(target)
-	self:dbg('CAN_CONNECT_NOW', can)
+	self:dbg(target, '?CAN_CONNECT_NOW', '%s', can)
 	return can
 end
 
@@ -141,29 +147,31 @@ function client:connect_now(target)
 	if not sock then return nil, err end
 	self:inc_conn_count(target)
 	local ok, err = sock:connect(host, port)
-	self:dbg('CONNECT', ok, err)
+	self:dbg(target, '+CONNECT', '%s %s', sock, err or '')
 	if not ok then
 		self:dec_conn_count(target)
 		return nil, err
 	end
-	glue.after(sock, 'close', function()
+	glue.after(sock, 'close', function(sock)
+		self:dbg(target, '-DISCONNECT', '%s', sock)
 		self:dec_conn_count(target)
 		self:connect_and_resume_next_wait_conn_thread()
 	end)
 	local http = http:new(target.http_args)
-	self:dbg('HTTP', http)
 	http:bind_luasocket(sock)
+	self:dbg(target, ' BIND_LUASOCKET', '%s %s', sock, http)
 	if http.https then
 		local ok, err = http:bind_luasec(sock, host)
-		self:dbg('BIND_LUASEC', ok, err)
+		self:dbg(target, ' BIND_LUASEC', '%s %s %s', sock, http, err or '')
 		if not ok then return nil, err end
 	end
 	return http
 end
 
 function client:wait_conn(target)
-	self:push_wait_conn_thread(loop.current(), target)
-	self:dbg('WAIT_CONN')
+	local thread = loop.current()
+	self:push_wait_conn_thread(thread, target)
+	self:dbg(target, '=WAIT_CONN', '%s %s', thread, target)
 	return loop.suspend() --http, err
 end
 
@@ -187,7 +195,7 @@ end
 function client:resume_matching_wait_conn_thread(target, http)
 	local thread = self:pull_matching_wait_conn_thread(target)
 	if not thread then return end
-	self:dbg('RESUME_WAIT_CONN')
+	self:dbg(target, '>WAIT_CONN', '%s', thread)
 	loop.resume(thread, http)
 	return true
 end
@@ -200,7 +208,7 @@ function client:_can_pipeline_new_requests(http, target, req)
 end
 function client:can_pipeline_new_requests(http, target, req)
 	local can = self:_can_pipeline_new_requests(http, target, req)
-	self:dbg('CAN_PIPELINE_NEW_REQUESTS', can)
+	self:dbg(target, '?CAN_PIPELINE', '%s', can)
 	return can
 end
 
@@ -209,20 +217,22 @@ end
 function client:push_wait_response_thread(http, thread)
 	push(attr(http, 'wait_response_threads'), thread)
 	http.wait_response_count = (http.wait_response_count or 0) + 1
-	self:dbg('+WAIT_RESPONSE')
+	self:dbg(target, '+WAIT_RESPONSE')
 end
 
 function client:pull_wait_response_thread(http)
 	local queue = http.wait_response_threads
 	local thread = queue and pull(queue)
 	if not thread then return end
-	self:dbg('-WAIT_RESPONSE')
+	self:dbg(target, '-WAIT_RESPONSE')
 	return thread
 end
 
 function client:read_response_now(http, req)
 	http.reading_response = true
+	self:dbg(http.target, '+READ_RESPONSE', '%s.%s.%s', http.target, http, req)
 	local res, err, errtype = http:read_response(req)
+	self:dbg(http.target, '-READ_RESPONSE', '%s.%s.%s', http.target, http, req)
 	http.reading_response = false
 	return res, err, errtype
 end
@@ -257,14 +267,23 @@ end
 --request call ---------------------------------------------------------------
 
 function client:request(t)
+
 	local target = self:target(t)
+
+	self:dbg(target, '+REQUEST', '%s = %s', target, tostring(target))
 
 	local http, err = self:get_conn(target)
 	if not http then return nil, err end
 
 	local req = http:make_request(t)
+
+	self:dbg(target, '+SEND_REQUEST', '%s.%s.%s %s %s',
+		target, http, req, req.method, req.uri)
+
 	local ok, err = http:send_request(req)
 	if not ok then return nil, err, req end
+
+	self:dbg(target, '-SEND_REQUEST', '%s.%s.%s', target, http, req)
 
 	local waiting_response
 	if http.reading_response then
@@ -303,6 +322,9 @@ function client:request(t)
 		end
 	end
 
+	self:dbg(target, '-REQUEST', '%s.%s.%s body: %d bytes',
+		target, http, req, #res.content)
+
 	return res, req
 end
 
@@ -310,63 +332,14 @@ end
 
 function client:new(t)
 	local self = glue.object(self, {}, t)
-	self.conn_count = 0
 	self.t2 = glue.tuples(2)
 	self.t3 = glue.tuples(3)
+	if self.debug then
+		local dbg = require'http_debug'
+		dbg:install_to_client(self)
+	end
 	return self
 end
-
---test download speed --------------------------------------------------------
-
-if not ... then
-
-local function search_page_url(pn)
-	return 'https://luapower.com/'
-end
-
-function kbytes(n)
-	if type(n) == 'string' then n = #n end
-	return n and string.format('%.1fkB', n/1024)
-end
-
-function mbytes(n)
-	if type(n) == 'string' then n = #n end
-	return n and string.format('%.1fmB', n/(1024*1024))
-end
-
-local client = client:new()
-client.max_conn = 1
-client.max_pipelined_requests = 0
---client.debug = false
-local n = 0
-for i=1,2 do
-	loop.newthread(function()
-		local res, req = client:request{
-			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
-			host = 'luapower.com', uri = '/', https = true,
-			--host = 'mokingburd.de',
-			--host = 'www.google.com', https = true,
-			receive_content = 'string',
-			debug = {protocol = false, stream = false},
-			max_line_size = 1024,
-			--close = true,
-		}
-		if res then
-			n = n + #res.content
-			print('REQUEST', req.http.host, req.http.port, req.uri, #res.content)
-		else
-			print('ERROR:', req)
-		end
-	end)
-end
-local t0 = time.clock()
-loop.start(5)
-t1 = time.clock()
-print(mbytes(n / (t1 - t0))..'/s')
-
-end
-
-
 
 --[==[
 function client:cookie_jar()
@@ -432,3 +405,5 @@ function client:cookie_jar()
 	end
 end
 ]==]
+
+return client
