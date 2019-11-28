@@ -17,6 +17,10 @@ local http = {}
 --raise protocol errors with check() instead of assert() or error() which
 --makes functions wrapped with http:protect() return nil,err for those errors.
 
+--we distinguish between invalid usage (bugs on this side, which raise),
+--protocol errors (bugs on the other side which don't raise) and I/O errors
+--(network failures which can be temporary, making the call retriable).
+
 local error_class = {
 	protocol = {id = 'protocol_error'},
 	io = {id = 'io_error'},
