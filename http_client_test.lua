@@ -18,12 +18,12 @@ function mbytes(n)
 end
 
 local client = client:new{
-	max_conn = 3,
-	max_pipelined_requests = 0,
+	max_conn = 5,
+	max_pipelined_requests = 10,
 	debug = true,
 }
 local n = 0
-for i=1,3 do
+for i=1,100 do
 	loop.newthread(function()
 		local res, req = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
@@ -31,8 +31,8 @@ for i=1,3 do
 			--host = 'mokingburd.de',
 			--host = 'www.google.com', https = true,
 			receive_content = 'string',
-			debug = {protocol = true, stream = false},
-			max_line_size = 1024,
+			debug = {protocol = false, stream = false},
+			--max_line_size = 1024,
 			--close = true,
 		}
 		if res then

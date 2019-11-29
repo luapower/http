@@ -17,11 +17,19 @@ GZip (de)compression can be enabled with `http.zlib = require'zlib'`.
 
 ## API
 
-`http:new(t)
+`http:new(t) -> http`
 
-## Client-side API
+### Client-side API
 
-`http:perform_request(t, write_content) -> http_version, status, headers, content, closed`
+#### `http:perform_request(t, write_content) -> http_version, status, headers, content, closed`
+
+--------------------------------- --------------------------------------------
+`host`                            host name or IP address to connect to
+`port`                            port (optional)
+`client_ip`                       client ip to bind to (optional)
+`https`                           `true` to use TLS
+`max_line_size`                   change the HTTP line size limit
+--------------------------------- --------------------------------------------
 
 --------------------------------- --------------------------------------------
 Client sets request headers:      Based on:
@@ -42,9 +50,9 @@ content-length                    know how much to read from the socket.
 connection                        read the body in absence of content-length.
 --------------------------------- --------------------------------------------
 
-## Server-side API
+### Server-side API
 
-`http:read_request(write_content) -> http_version, method, uri, headers, content`
+#### `http:read_request(write_content) -> http_version, method, uri, headers, content`
 
 --------------------------------- --------------------------------------------
 Server reads from request:        In order to:
@@ -54,7 +62,7 @@ content-encoding                  decompress the body.
 content-length                    know how much to read from the socket.
 --------------------------------- --------------------------------------------
 
-`http:send_response(t, request_headers)`
+#### `http:send_response(t, request_headers)`
 
 --------------------------------- --------------------------------------------
 Server sets response headers:     Based on:
@@ -67,4 +75,3 @@ allow                             t.allowed_methods
 date                              os.time()
 content-type                      t.content_type, t.content_types, accept header.
 --------------------------------- --------------------------------------------
-

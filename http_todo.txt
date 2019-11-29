@@ -1,4 +1,3 @@
-- http_client: fix pipelining
 
 - http_client: cookies
 
@@ -10,7 +9,11 @@
 
 - http_client: should_retry(io_err), max_retries
 
-- http: read/ignore traliers: TE, Trailer
+- http: read traliers: TE, Trailer
+
+- close all connections after loop exits.
+
+- websockets
 
 ------------------------------------------------------------------------------
 

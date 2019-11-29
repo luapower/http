@@ -1,4 +1,5 @@
 
+local ffi = require'ffi'
 local time = require'time'
 local loop = require'socketloop'
 local glue = require'glue'
@@ -65,15 +66,21 @@ function dbg:clock_table(tag)
 	return attr(attr(self, 'clocks'), assert(tag))
 end
 
-function dbg:reset_clock(tag)
+function dbg:start_clock(tag)
 	local clock = self:clock_table(tag)
 	clock.t0 = time.clock()
 	clock.t1 = clock.t0
 end
 
+function dbg:reset_clock(tag)
+	local clock = self:clock_table(tag)
+	clock.t0 = nil
+	clock.t1 = nil
+end
+
 function dbg:clock(tag)
 	local clock = self:clock_table(tag)
-	if not clock.t0 then self:reset_clock(tag) end
+	if not clock.t0 then self:start_clock(tag) end
 	local t0, t1, t2 = clock.t0, clock.t1, time.clock()
 	clock.t1 = t2
 	return t2 - t0, t2 - t1
@@ -81,11 +88,13 @@ end
 
 function dbg:install_to_http(http)
 
+	local dbg = self
+
 	local function D(tag, cmd, s)
 		local sock = http.getsocket and http:getsocket()
-		local S = self:id(sock) or '-'
-		local T = self:id(loop.current()) or 'M'
-		local t1, dt = self:clock(tag)
+		local S = dbg:id(sock) or '-'
+		local T = dbg:id(loop.current()) or 'M'
+		local t1, dt = dbg:clock(tag)
 		print(_('%6.2fs %5.2fs %-4s %-4s %s %s', t1, dt, T, S, cmd, s))
 	end
 
@@ -96,6 +105,10 @@ function dbg:install_to_http(http)
 			local ok, err = pcall(D, 'http', cmd, s)
 			if not ok then print(err) end
 		end
+
+		glue.after(http, 'close', function(self)
+			dbg:reset_clock'http'
+		end)
 
 	end
 
@@ -108,7 +121,7 @@ function dbg:install_to_http(http)
 				local s = s and s
 					:gsub('\r\n', '\n'..(' '):rep(34))
 					:gsub('\n%s*$', '')
-					:gsub('[%z\1-\9\11-\31\128-\255]', '.')
+					:gsub('[%z\1-\9\11-\31\128-\255]', '.') or ''
 				D('stream', cmd, _('%s %s', len, s))
 			end
 
@@ -128,6 +141,7 @@ function dbg:install_to_http(http)
 
 			glue.after(http, 'close', function(self)
 				P('CC')
+				dbg:reset_clock'stream'
 			end)
 
 		end)
@@ -144,16 +158,33 @@ function dbg:install_to_client(client)
 		if fmt then
 			args = glue.pack(...)
 			for i=1,args.n do
-				local id = dbg:id(args[i])
-				if id then args[i] = id end
+				local arg = args[i]
+				if type(arg) == 'boolean' then
+					args[i] = arg and 'yes' or 'no'
+				else
+					local id = dbg:id(arg)
+					if id then args[i] = id end
+				end
 			end
 		end
 		local s = fmt and _(fmt, glue.unpack(args)) or ''
-		print(_('          %4s %s %-16s %s',
+		local t1, dt = dbg:clock'request'
+		print(_('%6.2fs %5.2fs %-4s %-4s %-20s %s',
+			t1, dt,
 			dbg:id(target),
 			dbg:id(loop.current()),
 			event, s))
 	end
+
+	local function pass(...)
+		print('<'..('-'):rep(78))
+		return ...
+	end
+	glue.override(client, 'request', function(self, inherited, ...)
+		dbg:start_clock'request'
+		print('>'..('-'):rep(78))
+		return pass(inherited(self, ...))
+	end)
 
 end
 

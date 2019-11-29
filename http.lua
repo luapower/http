@@ -300,7 +300,10 @@ function http:read_chunks(write_content)
 		check(len, 'invalid chunk size')
 		total = total + len
 		self:dbg('<<', '%7d bytes; chunk %d', len, chunk_num)
-		if len == 0 then break end --last chunk (trailers not supported)
+		if len == 0 then --last chunk (trailers not supported)
+			self:read_line()
+			break
+		end
 		self:read_exactly(len, write_content)
 		self:read_line()
 	end
