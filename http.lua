@@ -446,7 +446,7 @@ function http:make_request(t)
 	req.method = t.method or 'GET'
 	req.uri = t.uri or '/'
 	req.headers = {}
-	assert(t.host, 'host missing') --the only required field, even for HTTP/1.0.
+	assert(t.host, 'host missing') --required, even for HTTP/1.0.
 	local default_port = self.https and 443 or 80
 	local port = self.port ~= default_port and self.port or nil
 	req.headers['host'] = {host = t.host, port = port}
@@ -747,7 +747,7 @@ end
 
 --luasec binding -------------------------------------------------------------
 
-function http:bind_luasec(sock, host)
+function http:bind_luasec(sock, vhost)
 	local ssl = require'ssl'
 	local ssock = ssl.wrap(sock, {
 		protocol = 'any',
@@ -755,7 +755,7 @@ function http:bind_luasec(sock, host)
 		verify   = 'none',
 		mode     = 'client',
 	})
-	ssock:sni(host)
+	ssock:sni(vhost)
 	sock:setsocket(ssock)
 	local ok, err
 	if sock.call_async then
@@ -785,7 +785,7 @@ function http:new(t)
 		dbg:install_to_http(self)
 	end
 	self:create_linebuffer()
-	self:dbg('CO', '%s %d', self.host, self.port)
+	self:dbg('CO', 'port:%d', self.port)
 	return self
 end
 

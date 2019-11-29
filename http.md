@@ -9,7 +9,7 @@ Works on an abstract I/O API made of three functions:
 	* `http:send(s | buf,sz) -> true | nil,err`
 	* `http:close()`
 
-GZip (de)compression can be enabled with `http.zlib = require'zlib'`.
+GZip compression can be enabled with `http.zlib = require'zlib'`.
 
 ## Status
 
@@ -17,29 +17,46 @@ GZip (de)compression can be enabled with `http.zlib = require'zlib'`.
 
 ## API
 
-`http:new(t) -> http`
+`http:new(opt) -> http`
+
+Create a HTTP protocol object that should be used on a single freshly open
+HTTP or HTTPS connection to either perform HTTP requests on it (as client)
+or to read-in HTTP requests and send-out responses (as server).
+
+The table `opt` can contain:
+
+--------------------------------- --------------------------------------------
+`port`                            server's port (optional; if client)
+`https`                           `true` if using TLS
+`max_line_size`                   change the HTTP line size limit
+--------------------------------- --------------------------------------------
 
 ### Client-side API
 
-#### `http:perform_request(t, write_content) -> http_version, status, headers, content, closed`
+#### `http:make_request(opt) -> req`
+
+Make a HTTP request object. The table `opt` can contain:
 
 --------------------------------- --------------------------------------------
-`host`                            host name or IP address to connect to
-`port`                            port (optional)
-`client_ip`                       client ip to bind to (optional)
-`https`                           `true` to use TLS
+`host`                            vhost name
 `max_line_size`                   change the HTTP line size limit
 --------------------------------- --------------------------------------------
 
 --------------------------------- --------------------------------------------
 Client sets request headers:      Based on:
 --------------------------------- --------------------------------------------
-host                              t.host, t.port
+host                              t.host, self.port
 connection: close                 t.close == true
 content-length                    t.content has length or t.content_size given
 transfer-encoding: chunked        type(t.content) == 'function'
 accept-encoding                   self.zlib
 content-encoding                  t.compress == true|'gzip'|'deflate'
+--------------------------------- --------------------------------------------
+
+
+
+#### `function http:send_request(req)`
+
 --------------------------------- --------------------------------------------
 Client reads from response:       In order to:
 --------------------------------- --------------------------------------------

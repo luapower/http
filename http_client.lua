@@ -9,7 +9,6 @@ local http = require'http'
 local uri = require'uri'
 local time = require'time'
 local glue = require'glue'
-http.zlib = require'zlib'
 
 local _ = string.format
 local attr = glue.attr
@@ -19,7 +18,7 @@ local pull = function(t)
 end
 
 local client = {
-	type = 'http_client',
+	type = 'http_client', http = http,
 	max_conn = 50,
 	max_conn_per_target = 20,
 	max_pipelined_requests = 10,
@@ -33,7 +32,7 @@ client.dbg = glue.noop
 
 --targets --------------------------------------------------------------------
 
---A target is a combination of (host, port, client_ip) on which one or more
+--A target is a combination of (vhost, port, client_ip) on which one or more
 --HTTP connections can be created subject to per-target limits.
 
 function client:assign_client_ip(host, port)
@@ -58,7 +57,6 @@ function client:target(t)
 		target.type = 'http_target'
 		target.http_args = {
 			target = target,
-			host = host,
 			port = port,
 			client_ip = client_ip,
 			https = https,

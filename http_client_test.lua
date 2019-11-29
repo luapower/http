@@ -1,5 +1,6 @@
 
 local client = require'http_client'
+client.http.zlib = require'zlib'
 local loop = require'socketloop'
 local time = require'time'
 

@@ -1,10 +1,6 @@
 
 - http_client: cookies
 
-- socketloop: timers
-	- socketloop: timeouts
-	- socketloop: sleep
-
 - http_client: redirects
 
 - http_client: should_retry(io_err), max_retries
@@ -13,9 +9,13 @@
 
 - close all connections after loop exits.
 
-- websockets
+- socketloop: timers
+	- socketloop: timeouts
+	- socketloop: sleep
 
 ------------------------------------------------------------------------------
+
+- websockets
 
 - client ranges:
 	Range: bytes=i-j
