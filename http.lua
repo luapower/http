@@ -459,7 +459,7 @@ function http:make_request(t)
 	end
 	req.content = t.content
 	req.content_size = t.content_size
-	if self.zlib and t.compress == true then
+	if self.zlib and t.compress ~= false then
 		req.headers['content-encoding'] = 'gzip'
 	end
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
@@ -682,7 +682,7 @@ function http:make_response(req, t)
 	if t.allowed_methods and not self:allow_method(res, t.allowed_methods) then
 		return false
 	end
-	if not self:accept_content_encoding(res, t.compress) then
+	if not self:accept_content_encoding(res, t.compress ~= false) then
 		return false
 	end
 	if t.content_type or t.content_types then

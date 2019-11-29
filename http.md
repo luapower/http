@@ -40,55 +40,40 @@ Make a HTTP request object. The table `opt` can contain:
 --------------------------------- --------------------------------------------
 `host`                            vhost name
 `max_line_size`                   change the HTTP line size limit
+`close`                           close the connection after replying
+`content`, `content_size`         body: string, read function or cdata buffer
+`compress`                        `false`: don't compress body
 --------------------------------- --------------------------------------------
 
---------------------------------- --------------------------------------------
-Client sets request headers:      Based on:
---------------------------------- --------------------------------------------
-host                              t.host, self.port
-connection: close                 t.close == true
-content-length                    t.content has length or t.content_size given
-transfer-encoding: chunked        type(t.content) == 'function'
-accept-encoding                   self.zlib
-content-encoding                  t.compress == true|'gzip'|'deflate'
---------------------------------- --------------------------------------------
+#### `http:send_request(req) -> true | nil,err,errtype`
 
+Send a request.
 
+#### `http:read_response(req) -> res | nil,err,errtype`
 
-#### `function http:send_request(req)`
-
---------------------------------- --------------------------------------------
-Client reads from response:       In order to:
---------------------------------- --------------------------------------------
-status, method                    decide whether to read the body or not.
-transfer-encoding                 read the body in chunks.
-content-encoding                  decompress the body.
-content-length                    know how much to read from the socket.
-connection                        read the body in absence of content-length.
---------------------------------- --------------------------------------------
+Receive server's response.
 
 ### Server-side API
 
-#### `http:read_request(write_content) -> http_version, method, uri, headers, content`
+#### `http:read_request(receive_content) -> req`
+
+Receive a client's request.
+
+#### `http:make_response(req, opt) -> res`
+
+Construct a HTTP response object.
+
+The `opt` table can contain:
 
 --------------------------------- --------------------------------------------
-Server reads from request:        In order to:
---------------------------------- --------------------------------------------
-transfer-encoding                 read the body in chunks.
-content-encoding                  decompress the body.
-content-length                    know how much to read from the socket.
+`close`                           close the connection (and tell client to)
+`content`, `content_size`         body: string, read function or cdata buffer
+`compress`                        `false`: don't compress body
+`allowed_methods`                 allowed methods: `{method->true}`
+`content_type`                    preferred content type
+`content_types`                   available content types: `{content_type1,...}`
 --------------------------------- --------------------------------------------
 
-#### `http:send_response(t, request_headers)`
+#### `http:send_response(res) -> true | nil,err,errtype`
 
---------------------------------- --------------------------------------------
-Server sets response headers:     Based on:
---------------------------------- --------------------------------------------
-connection: close                 t.close.
-content-length                    t.content_size or t.content's length.
-transfer-encoding: chunked        if t.content is a reader function.
-content-encoding: gzip|deflate    t.compress, self.zlib, accept-encoding header.
-allow                             t.allowed_methods
-date                              os.time()
-content-type                      t.content_type, t.content_types, accept header.
---------------------------------- --------------------------------------------
+Send a response.
