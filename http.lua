@@ -47,7 +47,7 @@ local function pass(self, ok, ...)
 	self:close()
 	local err = ...
 	local error_class = getmetatable(err)
-	if error_class then
+	if error_class and error_class.id then
 		return nil, err.message or error_class.id, error_class.id
 	else
 		error(err, 2)
@@ -265,14 +265,14 @@ function http:read_headers(rawheaders)
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
 		self:dbg('<-', '%-17s %s', name, value)
-		if headers.nofold[name] then
-			if rawheaders[name] then --headers can be duplicate.
+		if http_headers.nofold[name] then --prevent folding.
+			if rawheaders[name] then --duplicate header: add to list.
 				table.insert(rawheaders[name], value)
 			else
 				rawheaders[name] = {value}
 			end
 		else
-			if rawheaders[name] then --headers can be duplicate.
+			if rawheaders[name] then --duplicate header: fold.
 				rawheaders[name] = rawheaders[name] .. ',' .. value
 			else
 				rawheaders[name] = value

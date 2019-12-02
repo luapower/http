@@ -22,7 +22,7 @@ end
 --wkday "," SP 2DIGIT-day SP month SP 4DIGIT-year SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP "GMT"
 --eg. Sun, 06 Nov 1994 08:49:37 GMT
 local function rfc1123date(s)
-	local w,d,mo,y,h,m,s = s:match'([A-Za-z]+), (%d+) ([A-Za-z]+) (%d+) (%d+):(%d+):(%d+) GMT'
+	local w,d,mo,y,h,m,s = s:match'([A-Za-z]+), (%d+)[ %-]([A-Za-z]+)[ %-](%d+) (%d+):(%d+):(%d+) GMT'
 	d,y,h,m,s = tonumber(d),tonumber(y),tonumber(h),tonumber(m),tonumber(s)
 	w = wdays_map[w]
 	mo = months_map[mo]
@@ -66,11 +66,11 @@ local function format(t, fmt)
 	if not fmt or fmt == 'rfc1123' then
 		--wkday "," SP 2DIGIT-day SP month SP 4DIGIT-year SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP "GMT"
 		if type(t) == 'table' then
-			t = os.time(t)
+			t = glue.utctime(t)
 		end
-		local t = os.date('*t', t)
+		local t = os.date('!*t', t)
 		return string.format('%s, %02d %s %04d %02d:%02d:%02d GMT',
-			wdays[t.wday], t.day, t.month, t.year, t.hour, t.min, t.sec)
+			wdays[t.wday], t.day, months[t.month], t.year, t.hour, t.min, t.sec)
 	else
 		--TODO: other formats...
 		error'invalid format'
@@ -83,12 +83,13 @@ if not ... then
 	require'unit'
 	local d = {day = 6, sec = 37, wday = 1, min = 49, year = 1994, month = 11, hour = 8}
 	test(parse'Sun, 06 Nov 1994 08:49:37 GMT', d)
+	test(parse'Sun, 06-Nov-1994 08:49:37 GMT', d) --RFC my ass...
 	test(parse'Sunday, 06-Nov-94 08:49:37 GMT', d)
 	test(parse'Sun Nov  6 08:49:37 1994', d)
 	test(parse'Sun Nov 66 08:49:37 1994', nil)
 	test(parse'SundaY, 06-Nov-94 08:49:37 GMT', nil)
 	d.wday = nil --it gets populated based on date.
-	test(format(d), 'Sun, 06 11 1994 08:49:37 GMT')
+	test(format(d), 'Sun, 06 Nov 1994 08:49:37 GMT')
 end
 
 return {

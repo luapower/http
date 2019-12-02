@@ -38,7 +38,11 @@ end
 
 --simple compound value parsers (no comments or quoted strings involved)
 
-local date = http_date.parse
+local function date(s)
+	local t = http_date.parse(s)
+	return t and glue.utctime(t)
+end
+
 local url = glue.pass --urls are not parsed (replace with uri.parse if you want them parsed)
 
 local function namesplit(s)
@@ -525,33 +529,43 @@ function parse.refresh(s) --seconds; url=<url> (not standard but supported)
 	return n and {url = url, pause = n}
 end
 
-local token_class = '[^%c%s%(%)%<%>%@%,%;%:%\\%"%/%[%]%?%=%{%}]'
+local cookie_attrs = {
+	expires = date,
+	['max-age'] = tonumber,
+	domain = pass,
+	path = pass,
+	secure = pass,
+	httponly = pass,
+}
 
-local function unquote(t, quoted)
-	local n = string.match(t, "%$(%d+)$")
-	if n then n = tonumber(n) end
-	if quoted[n] then return quoted[n]
-	else return t end
-end
-
-function parse.set_cookie(s)
-	s = s .. ';$last=last;'
-	local _, __, n, v, i = s:find('('..token_class..'+)%s*=%s*(.-)%s*;%s*()')
-	local cookie = {
-		name = n,
-		value = unquote(v, quoted),
-		attributes = {}
-	}
-	while 1 do
-		_, __, n, v, i = string.find(c, "(" .. token_class ..
-			"+)%s*=?%s*(.-)%s*;%s*()", i)
-		if not n or n == "$last" then break end
-		cookie.attributes[#cookie.attributes+1] = {
-			name = n,
-			value = unquote(v, quoted)
-		}
+--cookies come as a list since they aren't allowed to be folded.
+function parse.set_cookie(t)
+	local dt = {}
+	for _,s in ipairs(t) do
+		local cookie = {}
+		for s in s:gmatch'[^;]+' do --name=val; attr1=val1; ...
+			if not cookie.name then --name=val | name="val" | name=
+				local k, v = s:match'^%s*(.-)%s*=%s*(.-)%s*$'
+				if k == '' then goto skip end --empty name: skip.
+				cookie.name = k
+				cookie.value = v:gsub('^"(.-)"$', '%1')
+			else --attr=val | attr= | attr | ext
+				local k, eq, v = s:match'^([^=]+)(=?)%s*(.-)%s*$'
+				k = glue.trim(k):lower()
+				if eq == '' then v = true end
+				local decode = cookie_attrs[k]
+				if decode then
+					v = decode(v)
+					cookie[k] = v
+				elseif k ~= 'name' and k ~= 'value' then --extension
+					cookie[k] = v
+				end
+			end
+		end
+		dt[#dt+1] = cookie
+		::skip::
 	end
-	cookie_table[#cookie_table+1] = cookie
+	return dt
 end
 
 function parse.cookie(s)
@@ -709,7 +723,7 @@ local function host(t)
 	end
 end
 
-local headers.nofold = { --headers that it isn't safe to fold.
+headers.nofold = { --headers that it isn't safe to fold.
 	['set-cookie'] = true,
 	cookie = true,
 	['www-authenticate'] = true,
