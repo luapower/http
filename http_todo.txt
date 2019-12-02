@@ -1,8 +1,6 @@
 
 - http_client: cookies
 
-- http_client: redirects
-
 - http_client: should_retry(io_err), max_retries
 
 - http: read traliers: TE, Trailer

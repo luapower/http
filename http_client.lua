@@ -65,6 +65,7 @@ function client:target(t)
 		}
 		target.max_pipelined_requests = t.max_pipelined_requests
 		target.max_conn = t.max_conn_per_target
+		target.max_redirects = t.max_redirects
 	else
 		assert(https == target.http_args.https)
 	end
@@ -263,6 +264,7 @@ function client:redirect_request_args(t, req, res)
 		compress = t.compress,
 		headers = t.headers,
 		receive_content = res.receive_content,
+		redirect_count = (t.redirect_count or 0) + 1,
 	}
 end
 
@@ -325,7 +327,17 @@ function client:request(t)
 	end
 
 	self:dbg(target, '-REQUEST', '%s.%s.%s body: %d bytes',
-		target, http, req, #res.content)
+		target, http, req,
+		res and type(res.content) == 'string' and #res.content or 0)
+
+	if res and res.redirect_location then
+		local t = self:redirect_request_args(t, req, res)
+		local max_redirects = target.max_redirects or self.max_redirects
+		if t.redirect_count >= max_redirects then
+			return nil, 'too many redirects', req
+		end
+		return self:request(t)
+	end
 
 	return res, req
 end

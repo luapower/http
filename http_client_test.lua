@@ -24,20 +24,21 @@ local client = client:new{
 	debug = true,
 }
 local n = 0
-for i=1,100 do
+for i=1,1 do
 	loop.newthread(function()
 		local res, req = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
-			host = 'luapower.com', uri = '/', https = true,
+			host = 'luapower.com', uri = '/',
+			--https = true,
 			--host = 'mokingburd.de',
 			--host = 'www.google.com', https = true,
 			receive_content = 'string',
-			debug = {protocol = false, stream = false},
+			debug = {protocol = true, stream = false},
 			--max_line_size = 1024,
 			--close = true,
 		}
 		if res then
-			n = n + #res.content
+			n = n + (res and res.content and #res.content or 0)
 		else
 			print('ERROR:', req)
 		end

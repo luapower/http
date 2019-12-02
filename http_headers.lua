@@ -7,7 +7,6 @@ if not ... then require'http_headers_test'; return end
 local glue = require'glue'
 local b64 = require'libb64'
 local http_date = require'http_date'
-local http_cookie = require'http_cookie'
 local re = require'lpeg.re' --for tokens()
 local uri = require'uri'
 local base64 = b64.decode_string
@@ -526,7 +525,34 @@ function parse.refresh(s) --seconds; url=<url> (not standard but supported)
 	return n and {url = url, pause = n}
 end
 
-parse.set_cookie = http_cookie.parse_set_cookie
+local token_class = '[^%c%s%(%)%<%>%@%,%;%:%\\%"%/%[%]%?%=%{%}]'
+
+local function unquote(t, quoted)
+	local n = string.match(t, "%$(%d+)$")
+	if n then n = tonumber(n) end
+	if quoted[n] then return quoted[n]
+	else return t end
+end
+
+function parse.set_cookie(s)
+	s = s .. ';$last=last;'
+	local _, __, n, v, i = s:find('('..token_class..'+)%s*=%s*(.-)%s*;%s*()')
+	local cookie = {
+		name = n,
+		value = unquote(v, quoted),
+		attributes = {}
+	}
+	while 1 do
+		_, __, n, v, i = string.find(c, "(" .. token_class ..
+			"+)%s*=?%s*(.-)%s*;%s*()", i)
+		if not n or n == "$last" then break end
+		cookie.attributes[#cookie.attributes+1] = {
+			name = n,
+			value = unquote(v, quoted)
+		}
+	end
+	cookie_table[#cookie_table+1] = cookie
+end
 
 function parse.cookie(s)
 	return kvlist(tokens(s), ';')
@@ -593,7 +619,10 @@ end
 
 local ci = string.lower
 local base64 = b64.encode_string
-local set_cookie = http_cookie.format_set_cookie
+
+local function set_cookie(v)
+	--TODO:
+end
 
 local function int(v)
 	glue.assert(math.floor(v) == v, 'integer expected')
@@ -648,7 +677,7 @@ end
 --{k1=v1,...} -> k1=v1,...
 local function kvlist(kvt)
 	local t = {}
-	for k,v in sorted_pairs(kvt) do
+	for k,v in glue.sortedpairs(kvt) do
 		if v then
 			t[#t+1] = v == true and k or string.format('%s=%s', k, v)
 		end
@@ -680,11 +709,11 @@ local function host(t)
 	end
 end
 
-local nofold_headers = { --headers that it isn't safe to send folded.
-	set_cookie = true,
+local headers.nofold = { --headers that it isn't safe to fold.
+	['set-cookie'] = true,
 	cookie = true,
-	www_authenticate = true,
-	proxy_authenticate = true,
+	['www-authenticate'] = true,
+	['proxy-authenticate'] = true,
 }
 
 local format = {
@@ -757,8 +786,10 @@ headers.format = format
 
 function headers.format_header(k, v)
 	local k = k:lower()
-	local f = format[k:gsub('-', '_')]
-	if f then v = f(v) end
+	if type(v) ~= 'string' then --strings pass-through unchanged.
+		local f = format[k:gsub('-', '_')]
+		if f then v = f(v) end
+	end
 	return k, tostring(v)
 end
 

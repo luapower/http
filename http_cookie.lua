@@ -2,36 +2,6 @@
 --HTTP cookie parsing and formatting (RFC 6265).
 --Originally from LuaSocket.
 
-local token_class = '[^%c%s%(%)%<%>%@%,%;%:%\\%"%/%[%]%?%=%{%}]'
-
-local function unquote(t, quoted)
-	local n = string.match(t, "%$(%d+)$")
-	if n then n = tonumber(n) end
-	if quoted[n] then return quoted[n]
-	else return t end
-end
-
-local function parse_set_cookie(c, quoted, cookie_table)
-	c = c .. ";$last=last;"
-	local _, __, n, v, i = string.find(c, "(" .. token_class ..
-		"+)%s*=%s*(.-)%s*;%s*()")
-	local cookie = {
-		name = n,
-		value = unquote(v, quoted),
-		attributes = {}
-	}
-	while 1 do
-		_, __, n, v, i = string.find(c, "(" .. token_class ..
-			"+)%s*=?%s*(.-)%s*;%s*()", i)
-		if not n or n == "$last" then break end
-		cookie.attributes[#cookie.attributes+1] = {
-			name = n,
-			value = unquote(v, quoted)
-		}
-	end
-	cookie_table[#cookie_table+1] = cookie
-end
-
 local function split_set_cookie(s, cookie_table)
 	cookie_table = cookie_table or {}
 	-- remove quoted strings from cookie list

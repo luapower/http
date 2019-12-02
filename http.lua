@@ -238,11 +238,11 @@ function http:send_headers(headers)
 			k, v = self:format_header(k, v)
 			if type(v) == 'table' then --must be sent unfolded.
 				for i,v in ipairs(v) do
-					self:dbg('->', '%-20s: %s', v)
+					self:dbg('->', '%-19s %s', v)
 					self:send(_('%s: %s\r\n', k, v))
 				end
 			else
-				self:dbg('->', '%-20s: %s', k, v)
+				self:dbg('->', '%-17s %s', k, v)
 				self:send(_('%s: %s\r\n', k, v))
 			end
 		end
@@ -264,11 +264,19 @@ function http:read_headers(rawheaders)
 		end
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
-		self:dbg('<-', '%-20s: %s', name, value)
-		if rawheaders[name] then --headers can be duplicate.
-			rawheaders[name] = rawheaders[name] .. ',' .. value
+		self:dbg('<-', '%-17s %s', name, value)
+		if headers.nofold[name] then
+			if rawheaders[name] then --headers can be duplicate.
+				table.insert(rawheaders[name], value)
+			else
+				rawheaders[name] = {value}
+			end
 		else
-			rawheaders[name] = value
+			if rawheaders[name] then --headers can be duplicate.
+				rawheaders[name] = rawheaders[name] .. ',' .. value
+			else
+				rawheaders[name] = value
+			end
 		end
 	end
 end
@@ -459,7 +467,7 @@ function http:make_request(t)
 	end
 	req.content = t.content
 	req.content_size = t.content_size
-	if self.zlib and t.compress ~= false then
+	if t.content and self.zlib and t.compress ~= false then
 		req.headers['content-encoding'] = 'gzip'
 	end
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)

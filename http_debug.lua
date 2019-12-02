@@ -176,14 +176,15 @@ function dbg:install_to_client(client)
 			event, s))
 	end
 
-	local function pass(...)
-		print('<'..('-'):rep(78))
+	local function pass(rc, ...)
+		print(('<'):rep(1+rc)..('-'):rep(78-rc))
 		return ...
 	end
-	glue.override(client, 'request', function(self, inherited, ...)
+	glue.override(client, 'request', function(self, inherited, t, ...)
 		dbg:start_clock'request'
-		print('>'..('-'):rep(78))
-		return pass(inherited(self, ...))
+		local rc = t.redirect_count or 0
+		print(('>'):rep(1+rc)..('-'):rep(78-rc))
+		return pass(rc, inherited(self, t, ...))
 	end)
 
 end
