@@ -10,10 +10,16 @@ local http_date = require'http_date'
 local re = require'lpeg.re' --for tokens()
 local uri = require'uri'
 local base64 = b64.decode_string
+local _ = string.format
+local concat = table.concat
 
 local headers = {}
 
 --simple value parsers
+
+function token(s)
+	return s ~= '' and not s:find'[%z\1-\32\127%(%)<>@,;:\\"/%[%]%?={}]' and s
+end
 
 function name(s) --Some-Name -> some_name
 	if s == '' then return end
@@ -38,9 +44,9 @@ end
 
 --simple compound value parsers (no comments or quoted strings involved)
 
+--date is in UTC. use glue.time() not os.time() to get a timestamp from it!
 local function date(s)
-	local t = http_date.parse(s)
-	return t and glue.utctime(t)
+	return http_date.parse(s)
 end
 
 local url = glue.pass --urls are not parsed (replace with uri.parse if you want them parsed)
@@ -166,7 +172,7 @@ function parse.accept(s) --#( type "/" subtype ( ";" token [ "=" ( token | quote
 		local type_, slash, subtype = unpack(t,i,j)
 		assert(slash == '/' and subtype, 'invalid media type')
 		type_, subtype = name(type_), name(subtype)
-		dt[string.format('%s/%s', type_, subtype)] = params or {}
+		dt[_('%s/%s', type_, subtype)] = params or {}
 	end
 	return dt
 end
@@ -316,7 +322,7 @@ function parse.content_type(s) --type "/" subtype *( ";" name "=" value )
 	local t,i,j, params = valueparams(tokens(s))
 	if t[i+1] ~= '/' then return end
 	params = params or {}
-	params.media_type = name(table.concat(t,'',i,j))
+	params.media_type = name(concat(t,'',i,j))
 	return params
 end
 
@@ -529,14 +535,18 @@ function parse.refresh(s) --seconds; url=<url> (not standard but supported)
 	return n and {url = url, pause = n}
 end
 
-local cookie_attrs = {
+headers.cookie_attr_parsers = {
 	expires = date,
 	['max-age'] = tonumber,
-	domain = pass,
+	domain = string.lower,
 	path = pass,
 	secure = pass,
 	httponly = pass,
 }
+
+local function cookie_value(s)
+	return not s:find'[%z\1-\32\127",;\\]' and s
+end
 
 --cookies come as a list since they aren't allowed to be folded.
 function parse.set_cookie(t)
@@ -546,16 +556,20 @@ function parse.set_cookie(t)
 		for s in s:gmatch'[^;]+' do --name=val; attr1=val1; ...
 			if not cookie.name then --name=val | name="val" | name=
 				local k, v = s:match'^%s*(.-)%s*=%s*(.-)%s*$'
-				if k == '' then goto skip end --empty name: skip.
+				v = v:gsub('^"(.-)"$', '%1')
+				k = token(k) --case-sensitive!
+				v = cookie_value(v)
+				--skip invalid cookies because they can't be given back.
+				if not k or not v then goto skip end
 				cookie.name = k
-				cookie.value = v:gsub('^"(.-)"$', '%1')
+				cookie.value = v
 			else --attr=val | attr= | attr | ext
 				local k, eq, v = s:match'^([^=]+)(=?)%s*(.-)%s*$'
 				k = glue.trim(k):lower()
 				if eq == '' then v = true end
-				local decode = cookie_attrs[k]
-				if decode then
-					v = decode(v)
+				local parse = headers.cookie_attr_parsers[k]
+				if parse then
+					v = parse(v)
 					cookie[k] = v
 				elseif k ~= 'name' and k ~= 'value' then --extension
 					cookie[k] = v
@@ -568,8 +582,18 @@ function parse.set_cookie(t)
 	return dt
 end
 
+--NOTE: The newer rfc-6265 disallows multiple cookie headers, but if a client
+--sends them anyway, they will come folded hence allowing comma as separator.
+--Problem is, older rfc-2965 also specifies some sort of cookie attributes.
+--If you ask me, I think it's a miracle that our computers even start when
+--we plug them in. Something to be grateful for.
 function parse.cookie(s)
-	return kvlist(tokens(s), ';')
+	local dt = {}
+	for s in s:gmatch'[^;,]+' do --name1=val1; ...
+		local k, v = s:match'^%s*(.-)%s*=%s*(.-)%s*$'
+		dt[k] = v:gsub('^"(.-)"$', '%1')
+	end
+	return dt
 end
 
 function parse.strict_transport_security(s) --http://tools.ietf.org/html/rfc6797
@@ -634,10 +658,6 @@ end
 local ci = string.lower
 local base64 = b64.encode_string
 
-local function set_cookie(v)
-	--TODO:
-end
-
 local function int(v)
 	glue.assert(math.floor(v) == v, 'integer expected')
 	return v
@@ -657,7 +677,7 @@ local function klist(t, format)
 				dt[#dt+1] = format(k)
 			end
 		end
-		return table.concat(dt, ',')
+		return concat(dt, ',')
 	else
 		return format(t) --got them raw
 	end
@@ -678,7 +698,7 @@ local function list(t, format)
 		for i,v in ipairs(t) do
 			dt[#dt+1] = format(v)
 		end
-		return table.concat(dt, ',')
+		return concat(dt, ',')
 	else
 		return format(t) --got them raw
 	end
@@ -691,12 +711,12 @@ end
 --{k1=v1,...} -> k1=v1,...
 local function kvlist(kvt)
 	local t = {}
-	for k,v in glue.sortedpairs(kvt) do
+	for k,v in pairs(kvt) do
 		if v then
-			t[#t+1] = v == true and k or string.format('%s=%s', k, v)
+			t[#t+1] = v == true and k or _('%s=%s', k, v)
 		end
 	end
-	return table.concat(t, ',')
+	return concat(t, ',')
 end
 
 --{name,k1=v1,...} -> name[; k1=v1 ...]
@@ -706,97 +726,127 @@ local function params(known)
 	end
 end
 
+--individual formatters per rfc-2616 section 14.
+
+local format = {}
+headers.format = format
+
 --{from=,to=,size=} -> bytes=<from>-<to>
-local function request_range(v)
+function format.range(v)
 end
 
 --{from=,to=,total=,size=} -> bytes <from>-<to>/<total>
-local function response_range(v)
+function format.content_range(v)
 
 end
 
-local function host(t)
-	if type(t) == 'table' then
-		return t.host .. (t.port and ':' .. t.port or '')
-	else
-		return t
+function format.host(t)
+	return t.host .. (t.port and ':' .. t.port or '')
+end
+
+local function q(s)
+	return s:find'[ %,%;]")' and '"'..s..'"' or s
+end
+
+function format.cookie(t)
+	local dt = {}
+	for k,v in pairs(t) do
+		assert(token(k), 'invalid cookie name')
+		assert(cookie_value(v), 'invalid cookie value')
+		dt[#dt+1] = _('%s=%s', k, q(v))
 	end
+	return concat(dt, ';')
+end
+
+function format.set_cookie(t)
+	for k,c in pairs(t) do
+		if type(c) == 'string' then c = {value = c} end
+		assert(token(k), 'invalid cookie name')
+		assert(cookie_value(c.value), 'invalid cookie value')
+		local t = {}
+		for k,v in pairs(t) do
+			k = k:lower()
+			assert(not k:find'[%z\1-32\127;=]',
+				'invalid cookie attribute name')
+			assert(v == true or not v:find'[%z\1-32\127;]',
+				'invalid cookie attribute value')
+			t[#t+1] = v == true and k or _('%s=%s', k, tostring(v))
+		end
+		local attrs = #t > 0 and ';'..concat(t, ';') or ''
+		dt[#dt+1] = _('%s=%s%s', k, q(v), attrs)
+	end
+	return dt --return as table so it can be sent unfolded.
 end
 
 headers.nofold = { --headers that it isn't safe to fold.
 	['set-cookie'] = true,
-	cookie = true,
 	['www-authenticate'] = true,
 	['proxy-authenticate'] = true,
 }
 
-local format = {
-	--general header fields
-	cache_control = kvlist, --no_cache
-	connection = cilist,
-	content_length = int,
-	content_md5 = base64,
-	content_type = params{charset = ci}, --text/html; charset=iso-8859-1
-	date = date,
-	pragma = nil, --cilist?
-	trailer = headernames,
-	transfer_encoding = cilist,
-	upgrade = nil, --http/2.0, shttp/1.3, irc/6.9, rta/x11
-	via = nil, --1.0 fred, 1.1 nowhere.com (apache/1.1)
-	warning = nil, --list of '(%d%d%d) (.-) (.-) ?(.*)' --code agent text[ date]
-	--standard request headers
-	accept = cilist, --paramslist?
-	accept_charset = cilist,
-	accept_encoding = cilist,
-	accept_language = cilist,
-	authorization = ci, --basic <password>
-	cookie = kvlist,
-	expect = cilist, --100-continue
-	from = nil, --user@example.com
-	host = host,
-	if_match = nil, --<etag>
-	if_modified_since = date,
-	if_none_match = nil, --etag
-	if_range = nil, --etag
-	if_unmodified_since	= date,
-	max_forwards = int,
-	proxy_authorization = nil, --basic <password>
-	range = request_range, --bytes=500_999
-	referer = nil, --it's an url but why parse it
-	te = cilist, --"trailers, deflate"
-	user_agent = nil, --mozilla/5.0 (compatible; msie 9.0; windows nt 6.1; wow64; trident/5.0)
-	--non-standard request headers
-	x_requested_with = ci,--xmlhttprequest
-	dnt = function(v) return v[#v]=='1' end, --means "do not track"
-	x_forwarded_for = nil, --client1, proxy1, proxy2
-	--standard response headers
-	accept_ranges = ci, --"bytes"
-	age = int, --seconds
-	allow = uppercaseklist, --methods
-	content_disposition = params{filename = nil}, --attachment; ...
-	content_encoding = cilist,
-	content_language = cilist,
-	content_location = url,
-	content_range = response_range, --bytes 0-500/1250
-	etag = nil,
-	expires = date,
-	last_modified = date,
-	link = nil, --?
-	location = url,
-	p3p = nil,
-	proxy_authenticate = ci, --basic
-	refresh = params{url = url}, --seconds; ... (not standard but supported)
-	retry_after = int, --seconds
-	server = nil,
-	set_cookie = set_cookie,
-	strict_transport_security = nil, --eg. max_age=16070400; includesubdomains
-	vary = headernames,
-	www_authenticate = ci,
-	--non-standard response headers
-	x_Forwarded_proto = ci, --https|http
-	x_powered_by = nil, --PHP/5.2.1
-}
-headers.format = format
+--general header fields
+format.cache_control = kvlist --no_cache
+format.connection = cilist
+format.content_length = int
+format.content_md5 = base64
+format.content_type = params{charset = ci} --text/html; charset=iso-8859-1
+format.date = date
+format.pragma = nil --cilist?
+format.trailer = headernames
+format.transfer_encoding = cilist
+format.upgrade = nil --http/2.0 shttp/1.3 irc/6.9 rta/x11
+format.via = nil --1.0 fred 1.1 nowhere.com (apache/1.1)
+format.warning = nil --list of '(%d%d%d) (.-) (.-) ?(.*)' --code agent text[ date]
+
+--standard request headers
+format.accept = cilist --paramslist?
+format.accept_charset = cilist
+format.accept_encoding = cilist
+format.accept_language = cilist
+format.authorization = ci --basic <password>
+format.expect = cilist --100-continue
+format.from = nil --user@example.com
+format.if_match = nil --<etag>
+format.if_modified_since = date
+format.if_none_match = nil --etag
+format.if_range = nil --etag
+format.if_unmodified_since	= date
+format.max_forwards = int
+format.proxy_authorization = nil --basic <password>
+format.referer = nil --it's an url but why parse it
+format.te = cilist --"trailers deflate"
+format.user_agent = nil --mozilla/5.0 (compatible; msie 9.0; windows nt 6.1; wow64; trident/5.0)
+
+--non-standard request headers
+format.x_requested_with = ci--xmlhttprequest
+format.dnt = function(v) return v[#v]=='1' end --means "do not track"
+format.x_forwarded_for = nil --client1 proxy1 proxy2
+
+--standard response headers
+format.accept_ranges = ci --"bytes"
+format.age = int --seconds
+format.allow = uppercaseklist --methods
+format.content_disposition = params{filename = nil} --attachment; ...
+format.content_encoding = cilist
+format.content_language = cilist
+format.content_location = url
+format.etag = nil
+format.expires = date
+format.last_modified = date
+format.link = nil --?
+format.location = url
+format.p3p = nil
+format.proxy_authenticate = ci --basic
+format.refresh = params{url = url} --seconds; ... (not standard but supported)
+format.retry_after = int --seconds
+format.server = nil
+format.strict_transport_security = nil --eg. max_age=16070400; includesubdomains
+format.vary = headernames
+format.www_authenticate = ci
+
+--non-standard response headers
+format.x_Forwarded_proto = ci --https|http
+format.x_powered_by = nil --PHP/5.2.1
 
 function headers.format_header(k, v)
 	local k = k:lower()

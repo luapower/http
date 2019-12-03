@@ -28,7 +28,7 @@ local function rfc1123date(s)
 	mo = months_map[mo]
 	if not check(w,d,mo,y,h,m,s) then return end
 	return {wday = w, day = d, year = y, month = mo,
-			hour = h, min = m, sec = s}
+			hour = h, min = m, sec = s, utc = true}
 end
 
 --weekday "," SP 2DIGIT "-" month "-" 2DIGIT SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP "GMT"
@@ -41,7 +41,7 @@ local function rfc850date(s)
 	if y then y = y + (y > 50 and 1900 or 2000) end
 	if not check(w,d,mo,y,h,m,s) then return end
 	return {wday = w, day = d, year = y,
-			month = mo, hour = h, min = m, sec = s}
+			month = mo, hour = h, min = m, sec = s, utc = true}
 end
 
 --wkday SP month SP ( 2DIGIT | ( SP 1DIGIT )) SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP 4DIGIT
@@ -53,7 +53,7 @@ local function asctimedate(s)
 	mo = months_map[mo]
 	if not check(w,d,mo,y,h,m,s) then return end
 	return {wday = w, day = d, year = y, month = mo,
-			hour = h, min = m, sec = s}
+			hour = h, min = m, sec = s, utc = true}
 end
 
 local function parse(s)
@@ -66,7 +66,7 @@ local function format(t, fmt)
 	if not fmt or fmt == 'rfc1123' then
 		--wkday "," SP 2DIGIT-day SP month SP 4DIGIT-year SP 2DIGIT ":" 2DIGIT ":" 2DIGIT SP "GMT"
 		if type(t) == 'table' then
-			t = glue.utctime(t)
+			t = glue.time(t)
 		end
 		local t = os.date('!*t', t)
 		return string.format('%s, %02d %s %04d %02d:%02d:%02d GMT',
@@ -81,7 +81,7 @@ end
 
 if not ... then
 	require'unit'
-	local d = {day = 6, sec = 37, wday = 1, min = 49, year = 1994, month = 11, hour = 8}
+	local d = {day = 6, sec = 37, wday = 1, min = 49, year = 1994, month = 11, hour = 8, utc = true}
 	test(parse'Sun, 06 Nov 1994 08:49:37 GMT', d)
 	test(parse'Sun, 06-Nov-1994 08:49:37 GMT', d) --RFC my ass...
 	test(parse'Sunday, 06-Nov-94 08:49:37 GMT', d)

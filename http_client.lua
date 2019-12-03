@@ -268,6 +268,77 @@ function client:redirect_request_args(t, req, res)
 	}
 end
 
+--cookie jars -----------------------------------------------------------------
+
+--[==[
+function
+
+	local jars = {} --{client_ip = jar}; jar = {}
+
+	local function cookie_attrs(t)
+		local dt = {}
+		if t then
+			for i,t in ipairs(t) do
+				dt[t.name] = t.value
+			end
+		end
+		return dt
+	end
+
+	local function parse_expires(s)
+		local t = s and http_date.parse(s)
+		return t and os.time(t)
+	end
+
+	--cookies: {{name=,value=,attributes={{name=,value=}}},...}
+	--[[local]] function store_cookies(client_ip, host, uri, cookies)
+		client_ip = client_ip or '*'
+		for i,cookie in ipairs(cookies) do
+			if cookie.name then
+				local a = cookie_attrs(cookie.attributes)
+				local jar = attr(jars, client_ip)
+				local k = tuple2(a.domain or host, a.path or '/')
+				local cookies = attr(jar, k)
+				cookies[cookie.name] = {
+					value = cookie.value,
+					expires = parse_expires(a.expires),
+				}
+				--print('>store_cookie', client_ip, host, cookie.name, cookie.value)
+			end
+		end
+	end
+
+	--return: {{name=, value=},...}
+	function stored_cookies(client_ip, host, uri)
+		client_ip = client_ip or '*'
+		local dt = {}
+		local jar = jars[client_ip]
+		if jar then
+			for k, cookies in pairs(jar) do
+				local domain, path = k()
+				if domain == host:sub(-#domain) then
+					if path == uri:sub(1, #path) then
+						for name,t in pairs(cookies) do
+							if not t.expires or t.expires > os.time() then
+								dt[#dt+1] = {name = name, value = t.value}
+							end
+						end
+					end
+				end
+			end
+		end
+		if #dt > 0 then
+			--print('>got_cookies', client_ip, host, pp.format(dt))
+		end
+		return dt
+	end
+end
+]==]
+
+function client:clear_cookies(client_ip, host, port)
+
+end
+
 --request call ---------------------------------------------------------------
 
 function client:request(t)
@@ -354,70 +425,5 @@ function client:new(t)
 	end
 	return self
 end
-
---[==[
-function client:cookie_jar()
-
-	local jars = {} --{client_ip = jar}; jar = {}
-
-	local function cookie_attrs(t)
-		local dt = {}
-		if t then
-			for i,t in ipairs(t) do
-				dt[t.name] = t.value
-			end
-		end
-		return dt
-	end
-
-	local function parse_expires(s)
-		local t = s and http_date.parse(s)
-		return t and os.time(t)
-	end
-
-	--cookies: {{name=,value=,attributes={{name=,value=}}},...}
-	--[[local]] function store_cookies(client_ip, host, uri, cookies)
-		client_ip = client_ip or '*'
-		for i,cookie in ipairs(cookies) do
-			if cookie.name then
-				local a = cookie_attrs(cookie.attributes)
-				local jar = attr(jars, client_ip)
-				local k = tuple2(a.domain or host, a.path or '/')
-				local cookies = attr(jar, k)
-				cookies[cookie.name] = {
-					value = cookie.value,
-					expires = parse_expires(a.expires),
-				}
-				--print('>store_cookie', client_ip, host, cookie.name, cookie.value)
-			end
-		end
-	end
-
-	--return: {{name=, value=},...}
-	function stored_cookies(client_ip, host, uri)
-		client_ip = client_ip or '*'
-		local dt = {}
-		local jar = jars[client_ip]
-		if jar then
-			for k, cookies in pairs(jar) do
-				local domain, path = k()
-				if domain == host:sub(-#domain) then
-					if path == uri:sub(1, #path) then
-						for name,t in pairs(cookies) do
-							if not t.expires or t.expires > os.time() then
-								dt[#dt+1] = {name = name, value = t.value}
-							end
-						end
-					end
-				end
-			end
-		end
-		if #dt > 0 then
-			--print('>got_cookies', client_ip, host, pp.format(dt))
-		end
-		return dt
-	end
-end
-]==]
 
 return client
