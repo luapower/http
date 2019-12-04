@@ -26,9 +26,16 @@ local client = {
 	client_ips = {},
 	max_retries = 0,
 	max_redirects = 20,
+	max_cookie_length = 8192,
+	max_cookies = 1e6,
+	max_cookies_per_host = 1000,
 }
 
 client.dbg = glue.noop
+
+function client:utc_time(date)
+	return glue.time(date, true)
+end
 
 --targets --------------------------------------------------------------------
 
@@ -39,22 +46,23 @@ function client:assign_client_ip(host, port)
 	if #self.client_ips == 0 then
 		return nil
 	end
-	local t = attr(self, 'last_client_ip_index')
-	local k = self.t2(host, port)
-	local i = (t[k] or 0) + 1
+	local ci = self.last_client_ip_index(host, port)
+	local i = (ci.index or 0)
 	if i > #self.client_ips then i = 1 end
-	t[k] = i
+	ci.index = i
 	return self.client_ips[i]
 end
 
 function client:target(t)
-	local host = assert(t.host)
+	local host = assert(t.host, 'host missing'):lower()
 	local https = t.https and true or false
-	local port = t.port or (https and 443 or 80)
+	local port = t.port and assert(tonumber(t.port), 'invalid port')
+		or (https and 443 or 80)
 	local client_ip = t.client_ip or self:assign_client_ip(host, port)
-	local target = self.t3(host, port, client_ip)
+	local target = self.targets(host, port, client_ip)
 	if not target.http_args then
 		target.type = 'http_target'
+		target.host = host
 		target.http_args = {
 			target = target,
 			port = port,
@@ -253,90 +261,109 @@ function client:redirect_request_args(t, req, res)
 	local https = loc.scheme == 'https' or nil
 	return {
 		http_version = res.http_version,
-		method = req.method,
+		method = 'GET',
 		close = t.close,
 		host = loc.host or t.host,
 		port = loc.port or (not loc.host and t.port or nil) or nil,
 		https = https,
 		uri = uri,
-		content = t.content,
-		content_size = t.content_size,
 		compress = t.compress,
-		headers = t.headers,
+		headers = glue.merge({['content-type'] = false}, t.headers),
 		receive_content = res.receive_content,
 		redirect_count = (t.redirect_count or 0) + 1,
 	}
 end
 
---cookie jars -----------------------------------------------------------------
+--cookie management ----------------------------------------------------------
 
---[==[
-function
+function client:accept_cookie(cookie, host)
+	return http:cookie_domain_matches_request_host(cookie.domain, host)
+end
 
-	local jars = {} --{client_ip = jar}; jar = {}
+function client:cookie_jar(ip)
+	return attr(attr(self, 'cookies'), ip or '*')
+end
 
-	local function cookie_attrs(t)
-		local dt = {}
-		if t then
-			for i,t in ipairs(t) do
-				dt[t.name] = t.value
+function client:remove_cookie(jar, domain, path, name)
+	--
+end
+
+function client:clear_cookies(client_ip, host, utc_time)
+	--
+end
+
+function client:store_cookies(target, req, res, utc_time)
+	local cookies = res.headers['set-cookie']
+	if not cookies then return end
+	local utc_time = utc_time or self:utc_time()
+	local client_jar = self:cookie_jar(target.client_ip)
+	local host = target.host
+	for _,cookie in ipairs(cookies) do
+		if self:accept_cookie(cookie, host) then
+			local expires
+			if cookie.expires then
+				expires = self:utc_time(cookie.expires)
+			elseif cookie['max-age'] then
+				expires = utc_time + cookie['max-age']
+			end
+			local domain = cookie.domain or host
+			local path = cookie.path or http:cookie_default_path(req.uri)
+			if expires and expires < utc_time then --expired: remove from jar.
+				self:remove_cookie(client_jar, domain, path, cookie.name)
+			else
+				local sc = attr(attr(attr(client_jar, domain), path), cookie.name)
+				sc.wildcard = cookie.domain and true or false
+				sc.secure = cookie.secure
+				sc.expires = expires
+				sc.value = cookie.value
 			end
 		end
-		return dt
 	end
+end
 
-	local function parse_expires(s)
-		local t = s and http_date.parse(s)
-		return t and os.time(t)
+function client:get_cookies(client_ip, host, uri, https, utc_time)
+	local client_jar = self:cookie_jar(client_ip)
+	if not client_jar then return end
+	local path = uri:match'^[^%?#]+'
+	local utc_time = utc_time or self:utc_time()
+	local cookies = {}
+	local names = {}
+	for s in host:gmatch'[^%.]+' do
+		push(names, s)
 	end
-
-	--cookies: {{name=,value=,attributes={{name=,value=}}},...}
-	--[[local]] function store_cookies(client_ip, host, uri, cookies)
-		client_ip = client_ip or '*'
-		for i,cookie in ipairs(cookies) do
-			if cookie.name then
-				local a = cookie_attrs(cookie.attributes)
-				local jar = attr(jars, client_ip)
-				local k = tuple2(a.domain or host, a.path or '/')
-				local cookies = attr(jar, k)
-				cookies[cookie.name] = {
-					value = cookie.value,
-					expires = parse_expires(a.expires),
-				}
-				--print('>store_cookie', client_ip, host, cookie.name, cookie.value)
-			end
-		end
-	end
-
-	--return: {{name=, value=},...}
-	function stored_cookies(client_ip, host, uri)
-		client_ip = client_ip or '*'
-		local dt = {}
-		local jar = jars[client_ip]
-		if jar then
-			for k, cookies in pairs(jar) do
-				local domain, path = k()
-				if domain == host:sub(-#domain) then
-					if path == uri:sub(1, #path) then
-						for name,t in pairs(cookies) do
-							if not t.expires or t.expires > os.time() then
-								dt[#dt+1] = {name = name, value = t.value}
-							end
+	local domain = names[#names]
+	for i = #names-1, 1, -1 do
+		domain = names[i] .. '.' .. domain
+		local domain_jar = client_jar[domain]
+		if domain_jar then
+			for cpath, path_jar in pairs(domain_jar) do
+				if http:cookie_path_matches_request_path(cpath, path) then
+					for name, sc in pairs(path_jar) do
+						if sc.expires and sc.expires < utc_time then --expired: auto-clean.
+							self:remove_cookie(client_jar, domain, cpath, sc.name)
+						elseif https or not sc.secure then --allow
+							cookies[name] = sc.value
 						end
 					end
 				end
 			end
 		end
-		if #dt > 0 then
-			--print('>got_cookies', client_ip, host, pp.format(dt))
-		end
-		return dt
 	end
+	return cookies
 end
-]==]
 
-function client:clear_cookies(client_ip, host, port)
+function client:save_cookies(file)
+	return glue.writefile(file, pp.format(self.cookies, '\t'), nil, file..'.tmp')
+end
 
+function client:load_cookies(file)
+	local s, err = glue.readfile(file)
+	if not s then return nil, err end
+	local f, err = loadstring('return '..s, file)
+	if not f then return nil, err end
+	local ok, t = pcall(f)
+	if not ok then return nil, t end
+	self.cookies = t
 end
 
 --request call ---------------------------------------------------------------
@@ -350,7 +377,10 @@ function client:request(t)
 	local http, err = self:get_conn(target)
 	if not http then return nil, err end
 
-	local req = http:make_request(t)
+	local cookies = self:get_cookies(target.client_ip, target.host,
+		t.uri or '/', target.http_args.https)
+
+	local req = http:make_request(t, cookies)
 
 	self:dbg(target, '+SEND_REQUEST', '%s.%s.%s %s %s',
 		target, http, req, req.method, req.uri)
@@ -381,8 +411,9 @@ function client:request(t)
 	end
 
 	local res, err, errtype = self:read_response_now(http, req)
-
 	if not res then return nil, err, errtype end
+
+	self:store_cookies(target, req, res)
 
 	if not taken and not http.closed then
 		if not self:resume_matching_wait_conn_thread(target, http) then
@@ -417,8 +448,9 @@ end
 
 function client:new(t)
 	local self = glue.object(self, {}, t)
-	self.t2 = glue.tuples(2)
-	self.t3 = glue.tuples(3)
+	self.last_client_ip_index = glue.tuples(2)
+	self.targets = glue.tuples(3)
+	self.cookies = {}
 	if self.debug then
 		local dbg = require'http_debug'
 		dbg:install_to_client(self)

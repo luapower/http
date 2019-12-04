@@ -236,14 +236,16 @@ function http:send_headers(headers)
 	for k, v in glue.sortedpairs(headers) do
 		if v ~= http.remove then
 			k, v = self:format_header(k, v)
-			if type(v) == 'table' then --must be sent unfolded.
-				for i,v in ipairs(v) do
-					self:dbg('->', '%-19s %s', v)
+			if v then
+				if type(v) == 'table' then --must be sent unfolded.
+					for i,v in ipairs(v) do
+						self:dbg('->', '%-19s %s', v)
+						self:send(_('%s: %s\r\n', k, v))
+					end
+				else
+					self:dbg('->', '%-17s %s', k, v)
 					self:send(_('%s: %s\r\n', k, v))
 				end
-			else
-				self:dbg('->', '%-17s %s', k, v)
-				self:send(_('%s: %s\r\n', k, v))
 			end
 		end
 	end
@@ -368,9 +370,9 @@ end
 function http:zlib_encoder(format, content, content_size)
 	assert(self.zlib, 'zlib not loaded')
 	if type(content) == 'string' then
-		return zlib.deflate(content, '', nil, format)
+		return self.zlib.deflate(content, '', nil, format)
 	elseif type(content) == 'cdata' then
-		return zlib.deflate(ffi.string(content, content_size), '', nil, format)
+		return self.zlib.deflate(ffi.string(content, content_size), '', nil, format)
 	else
 		return coroutine.wrap(function()
 			self.zlib.deflate(content, coroutine.yield, nil, format)
@@ -405,7 +407,7 @@ function http:send_body(content, content_size, content_encoding, transfer_encodi
 			self:dbg('>>', '%7d bytes total', total)
 		else
 			local len = content_size or #content
-			seld:dbg('>>', '%7d bytes', len)
+			self:dbg('>>', '%7d bytes', len)
 			self:send(content, content_size)
 		end
 	end
@@ -448,7 +450,7 @@ end
 
 --client-side ----------------------------------------------------------------
 
-function http:make_request(t)
+function http:make_request(t, cookies)
 	local req = {http = self, type = 'http_request'}
 	req.http_version = t.http_version or '1.1'
 	req.method = t.method or 'GET'
@@ -465,6 +467,7 @@ function http:make_request(t)
 	if self.zlib then
 		req.headers['accept-encoding'] = 'gzip, deflate'
 	end
+	req.headers['cookie'] = cookies
 	req.content = t.content
 	req.content_size = t.content_size
 	if t.content and self.zlib and t.compress ~= false then
@@ -497,7 +500,51 @@ function http:should_redirect(req, res)
 	local method, status = req.method, res.status
 	return res.headers['location']
 		and (status == 301 or status == 302 or status == 303 or status == 307)
-		and (method == 'GET' or method == 'HEAD')
+end
+
+local function is_ip(s)
+	return s:find'^%d+%.%d+%.%d+%.%d+'
+end
+
+function http:cookie_default_path(req_uri)
+	return '/' --TODO
+end
+
+--either cookie domain matches host exactly or domain is a suffix
+--    - The domain string is a suffix of the string.
+--	  - The last character of the string that is not included in the domain string
+--	    is a %x2E (".") character.
+--a host name (i.e., not an IP address).
+function http:cookie_domain_matches_request_host(domain, host)
+	return not domain or domain == host or (
+		host:sub(-#domain) == domain
+		and host:sub(-#domain-1, -#domain-1) == '.'
+		and not is_ip(host)
+	)
+end
+
+--cookie path matches request path exactly, or
+--cookie path ends in `/` and is a prefix of the request path, or
+--cookie path is a prefix of the request path, and the first
+--character of the request path that is not included in the cookie path is `/`.
+function http:cookie_path_matches_request_path(cpath, rpath)
+	if cpath == rpath then
+		return true
+	elseif cpath == rpath:sub(1, #cpath) then
+		if cpath:sub(-1, -1) == '/' then
+			return true
+		elseif rpath:sub(#cpath + 1, #cpath + 1) == '/' then
+			return true
+		end
+	end
+	return false
+end
+
+--NOTE: cookies are not port-specific nor protocol-specific.
+function http:should_send_cookie(cookie, host, path, https)
+	return (https or not cookie.secure)
+		and self:cookie_domain_matches_request_host(cookie, host)
+		and self:cookie_path_matches_request_path(cookie, path)
 end
 
 function http:read_response(req)
@@ -539,15 +586,6 @@ function http:read_response(req)
 	return res
 end
 http:protect'read_response'
-
-function http:perform_request(t)
-	local req = self:make_request(t)
-	local ok, err = self:send_request(req)
-	if not ok then return nil, err end
-	local res, err = self:read_response(req)
-	if not res then return nil, err end
-	return res, req
-end
 
 --server side ----------------------------------------------------------------
 
@@ -669,7 +707,7 @@ function http:accept_content_type(res, available)
 	end
 end
 
-function http:make_response(req, t)
+function http:make_response(req, t, utc_time)
 	local res = {http = self, request = req, type = 'http_response'}
 	res.headers = {}
 
@@ -700,7 +738,7 @@ function http:make_response(req, t)
 		end
 	end
 
-	res.headers['date'] = os.time()
+	res.headers['date'] = utc_time
 
 	res.content = t.content
 	res.content_size = t.content_size

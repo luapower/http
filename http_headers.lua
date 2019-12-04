@@ -2,7 +2,7 @@
 --http header values parsing and formatting.
 --Written by Cosmin Apreutesei. Public Domain.
 
-if not ... then require'http_headers_test'; return end
+if not ... then require'anaf'; return end
 
 local glue = require'glue'
 local b64 = require'libb64'
@@ -538,10 +538,8 @@ end
 headers.cookie_attr_parsers = {
 	expires = date,
 	['max-age'] = tonumber,
-	domain = string.lower,
-	path = pass,
-	secure = pass,
-	httponly = pass,
+	domain = function(s) return s ~= '' and s:lower() or nil end,
+	path = function(s) return s:sub(1, 1) == '/' and s or nil end,
 }
 
 local function cookie_value(s)
@@ -558,8 +556,8 @@ function parse.set_cookie(t)
 				local k, v = s:match'^%s*(.-)%s*=%s*(.-)%s*$'
 				v = v:gsub('^"(.-)"$', '%1')
 				k = token(k) --case-sensitive!
-				v = cookie_value(v)
-				--skip invalid cookies because they can't be given back.
+				v = k and cookie_value(v)
+				--skip invalid cookies because they can't be given back anyway.
 				if not k or not v then goto skip end
 				cookie.name = k
 				cookie.value = v
@@ -571,11 +569,12 @@ function parse.set_cookie(t)
 				if parse then
 					v = parse(v)
 					cookie[k] = v
-				elseif k ~= 'name' and k ~= 'value' then --extension
+				elseif k ~= 'name' and k ~= 'value' then --attribute
 					cookie[k] = v
 				end
 			end
 		end
+		if not cookie.name then goto skip end
 		dt[#dt+1] = cookie
 		::skip::
 	end
@@ -755,7 +754,7 @@ function format.cookie(t)
 		assert(cookie_value(v), 'invalid cookie value')
 		dt[#dt+1] = _('%s=%s', k, q(v))
 	end
-	return concat(dt, ';')
+	return #dt > 0 and concat(dt, ';')
 end
 
 function format.set_cookie(t)
@@ -854,7 +853,7 @@ function headers.format_header(k, v)
 		local f = format[k:gsub('-', '_')]
 		if f then v = f(v) end
 	end
-	return k, tostring(v)
+	return k, v and tostring(v)
 end
 
 return headers
