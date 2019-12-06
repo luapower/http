@@ -125,14 +125,14 @@ function dbg:install_to_http(http)
 				D('stream', cmd, _('%s %s', len, s))
 			end
 
-			glue.override(http, 'read', function(self, inherited, buf, maxsz)
+			glue.override(http, 'read', function(inherited, self, buf, maxsz)
 				local sz, err = inherited(self, buf, maxsz)
 				if not sz then return nil, err end
 				P(' <', ffi.string(buf, sz))
 				return sz
 			end)
 
-			glue.override(http, 'send', function(self, inherited, buf, maxsz)
+			glue.override(http, 'send', function(inherited, self, buf, maxsz)
 				local sz, err = inherited(self, buf, maxsz)
 				if not sz then return nil, err end
 				P(' >', ffi.string(buf, sz))
@@ -180,7 +180,7 @@ function dbg:install_to_client(client)
 		print(('<'):rep(1+rc)..('-'):rep(78-rc))
 		return ...
 	end
-	glue.override(client, 'request', function(self, inherited, t, ...)
+	glue.override(client, 'request', function(inherited, self, t, ...)
 		dbg:start_clock'request'
 		local rc = t.redirect_count or 0
 		print(('>'):rep(1+rc)..('-'):rep(78-rc))
