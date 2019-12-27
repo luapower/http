@@ -6,4 +6,3 @@ local server = server:new{
 }
 
 server:start()
-

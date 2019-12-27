@@ -48,8 +48,4 @@ function server:new(t)
 	self.socket = loop.newserver(self.ip, self.port, handler)
 end
 
-
-	return self
-end
-
 return server
