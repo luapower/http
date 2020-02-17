@@ -791,6 +791,34 @@ function http:bind_luasocket(sock)
 
 end
 
+--socket2 binding ------------------------------------------------------------
+
+function http:bind_socket2(sock)
+
+	function self:getsocket() return sock end
+	function self:setsocket(newsock) sock = newsock end
+
+	function self:read(buf, sz)
+		local s, err, p = sock:receive(sz, nil, true)
+		if not s then return nil, err end
+		assert(#s <= sz)
+		ffi.copy(buf, s, #s)
+		return #s
+	end
+
+	function self:send(buf, sz)
+		sz = sz or #buf
+		local s = ffi.string(buf, sz)
+		return sock:send(s)
+	end
+
+	function self:close()
+		sock:close()
+		self.closed = true
+	end
+
+end
+
 --luasec binding -------------------------------------------------------------
 
 function http:bind_luasec(sock, vhost)
