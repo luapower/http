@@ -1,7 +1,20 @@
 
+--USE_SOCKETLOOP = true
+
 local client = require'http_client'
 client.http.zlib = require'zlib'
-local loop = require'socketloop'
+
+local newthread, start
+if USE_SOCKETLOOP then
+	local loop = require'socketloop'
+	newthread = loop.newthread
+	startloop = loop.start
+else
+	local socket = require'socket2'
+	newthread = socket.newthread
+	startloop = socket.start
+end
+
 local time = require'time'
 
 local function search_page_url(pn)
@@ -25,7 +38,7 @@ local client = client:new{
 }
 local n = 0
 for i=1,1 do
-	loop.newthread(function()
+	newthread(function()
 		local res, req = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			host = 'luapower.com', uri = '/',
@@ -45,7 +58,7 @@ for i=1,1 do
 	end)
 end
 local t0 = time.clock()
-loop.start(5)
+startloop(5)
 t1 = time.clock()
 print(mbytes(n / (t1 - t0))..'/s')
 

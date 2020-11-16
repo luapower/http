@@ -799,11 +799,7 @@ function http:bind_socket2(sock)
 	function self:setsocket(newsock) sock = newsock end
 
 	function self:read(buf, sz)
-		local s, err, p = sock:receive(sz, nil, true)
-		if not s then return nil, err end
-		assert(#s <= sz)
-		ffi.copy(buf, s, #s)
-		return #s
+		return sock:recv(buf, sz)
 	end
 
 	function self:send(buf, sz)
@@ -821,13 +817,13 @@ end
 
 --luasec binding -------------------------------------------------------------
 
-function http:bind_luasec(sock, vhost)
+function http:bind_luasec(sock, vhost, mode)
 	local ssl = require'ssl'
 	local ssock = ssl.wrap(sock, {
+		mode     =  mode,
 		protocol = 'any',
 		options  = {'all', 'no_sslv2', 'no_sslv3', 'no_tlsv1'},
 		verify   = 'none',
-		mode     = 'client',
 	})
 	ssock:sni(vhost)
 	sock:setsocket(ssock)
@@ -846,7 +842,43 @@ function http:bind_luasec(sock, vhost)
 		self:close()
 		return nil, err
 	end
+	return true
+end
 
+--libtls binding -------------------------------------------------------------
+
+function http:bind_libtls(tcp, vhost, mode)
+	local stcp = require'libtls_socket2'
+	local stcp, err = stcp.new(tcp, {
+		mode = mode,
+		alpn = '123',
+		ca = 'x',
+		--ciphers = 'P-256',
+		--crl = 'x',
+		--dheparams = 'a',
+		--ecdhecurve = 'x',
+		--ecdhecurves = 'z,y',
+		--ocsp_staple = 'x',
+		--protocols = 'x',
+		verify_depth = true,
+		--TODO: add sessions to libtls-bearssl and test them.
+		--session_id = '1',
+		--session_lifetime = 1,
+		prefer_ciphers_client  = true,
+		prefer_ciphers_server  = true,
+		insecure_noverifycert  = true,
+		insecure_noverifyname  = true,
+		insecure_noverifytime  = true,
+		--ocsp_require_stapling  = true,
+		--verify                 = true,
+		--verify_client          = true,
+		--verify_client_optional = true,
+	})
+	if not stcp then
+		self:close()
+		return nil, err
+	end
+	self:setsocket(stcp)
 	return true
 end
 

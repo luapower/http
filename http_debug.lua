@@ -13,6 +13,8 @@ end
 function dbg.is.luasocket_socket(t) return tostring(t):find'^tcp{%w+}' end
 function dbg.is.luasec_socket(t) return tostring(t):find'^SSL' end
 function dbg.is.socketloop_socket(t) return type(t) == 'table' and t.type == 'socketloop_socket' end
+function dbg.is.socket2_tcp_socket(t) return type(t) == 'table' and t.issocket and t:type() == 'tcp' end
+function dbg.is.libtls_socket2_tcp_socket(t) return type(t) == 'table' and t.type == 'libtls_socket2_tcp_socket' end
 function dbg.is.http(t) return type(t) == 'table' and t.type == 'http_connection' end
 function dbg.is.target(t) return type(t) == 'table' and t.type == 'http_target' end
 function dbg.is.request(t) return type(t) == 'table' and t.type == 'http_request' end
@@ -41,6 +43,8 @@ dbg.prefixes = {
 	luasocket_socket = 's',
 	luasec_socket = 'x',
 	socketloop_socket = 'S',
+	socket2_tcp_socket = 'S',
+	libtls_socket2_tcp_socket = 'X',
 	http = 'H',
 	target = '@',
 	request = 'R',
