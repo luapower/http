@@ -4,17 +4,7 @@
 local client = require'http_client'
 client.http.zlib = require'zlib'
 
-local newthread, start
-if USE_SOCKETLOOP then
-	local loop = require'socketloop'
-	newthread = loop.newthread
-	startloop = loop.start
-else
-	local socket = require'socket2'
-	newthread = socket.newthread
-	startloop = socket.start
-end
-
+local loop = require(false and 'socket2_libtls_http' or 'socket_luasec_http')
 local time = require'time'
 
 local function search_page_url(pn)
@@ -32,13 +22,14 @@ function mbytes(n)
 end
 
 local client = client:new{
+	loop = loop,
 	max_conn = 5,
 	max_pipelined_requests = 10,
 	debug = true,
 }
 local n = 0
 for i=1,1 do
-	newthread(function()
+	loop.newthread(function()
 		local res, req = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			host = 'luapower.com', uri = '/',
@@ -49,6 +40,7 @@ for i=1,1 do
 			debug = {protocol = true, stream = false},
 			--max_line_size = 1024,
 			--close = true,
+
 		}
 		if res then
 			n = n + (res and res.content and #res.content or 0)
@@ -58,7 +50,7 @@ for i=1,1 do
 	end)
 end
 local t0 = time.clock()
-startloop(5)
+loop.start(5)
 t1 = time.clock()
 print(mbytes(n / (t1 - t0))..'/s')
 

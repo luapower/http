@@ -4,21 +4,6 @@
 
 if not ... then require'http_client_test'; return end
 
-local tcp_socket, suspend, resume, current
-if USE_SOCKETLOOP then
-	local loop = require'socketloop'
-	tcp_socket    = loop.tcp
-	suspend       = loop.suspend
-	resume        = loop.resume
-	currentthread = loop.current
-else
-	local socket = require'socket2'
-	tcp_socket    = socket.tcp
-	suspend       = socket.suspend
-	resume        = socket.resume
-	currentthread = socket.thread
-end
-
 local http = require'http'
 local uri = require'uri'
 local time = require'time'
@@ -43,6 +28,9 @@ local client = {
 	max_cookie_length = 8192,
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
+	tls_options = {
+		ca_file = 'cacert.pem',
+	},
 }
 
 client.dbg = glue.noop
@@ -165,7 +153,7 @@ end
 
 function client:connect_now(target)
 	local host, port, client_ip = target()
-	local tcp, err = tcp_socket(client_ip)
+	local tcp, err = self.loop.tcp(client_ip)
 	if not tcp then return nil, err end
 	self:inc_conn_count(target)
 	local ok, err = tcp:connect(host, port)
@@ -180,22 +168,13 @@ function client:connect_now(target)
 		self:resume_next_wait_conn_thread()
 	end)
 	local http = http:new(target.http_args)
-	if USE_SOCKETLOOP then
-		http:bind_luasocket(tcp)
-		self:dbg(target, ' BIND_LUASOCKET', '%s %s', tcp, http)
-	else
-		http:bind_socket2(tcp)
-		self:dbg(target, ' BIND_SOCKET2', '%s %s', tcp, http)
-	end
+	self.loop.http_bind_socket(http, tcp)
+	self:dbg(target, ' BIND_SOCKET', '%s %s', tcp, http)
 	if http.https then
-		local ok, err
-		if USE_SOCKETLOOP then
-			ok, err = http:bind_luasec(tcp, host, 'client')
-			self:dbg(target, ' BIND_LUASEC', '%s %s %s', http:getsocket(), http, err or '')
-		else
-			ok, err = http:bind_libtls(tcp, host, 'client')
-			self:dbg(target, ' BIND_LIBTLS', '%s %s %s', http:getsocket(), http, err or '')
-		end
+		local t1 = self.tls_options
+		local t0 = self.__index.tls_options
+		local ok, err = self.loop.http_bind_tls(self, http, tcp, host, 'client', t1, t0)
+		self:dbg(target, ' BIND_TLS', '%s %s %s', http:getsocket(), http, err or '')
 		if not ok then
 			return nil, err
 		end
@@ -204,10 +183,10 @@ function client:connect_now(target)
 end
 
 function client:wait_conn(target)
-	local thread = currentthread()
+	local thread = self.loop.thread()
 	self:push_wait_conn_thread(thread, target)
 	self:dbg(target, '=WAIT_CONN', '%s %s', thread, target)
-	local http = suspend()
+	local http = self.loop.suspend()
 	if http == 'connect' then
 		return self:connect_now(target)
 	else
@@ -229,14 +208,14 @@ function client:resume_next_wait_conn_thread()
 	local thread, target = self:pull_wait_conn_thread()
 	if not thread then return end
 	self:dbg(target, '^WAIT_CONN', '%s', thread)
-	resume(thread, 'connect')
+	self.loop.resume(thread, 'connect')
 end
 
 function client:resume_matching_wait_conn_thread(target, http)
 	local thread = self:pull_matching_wait_conn_thread(target)
 	if not thread then return end
 	self:dbg(target, '^WAIT_CONN', '%s < %s', thread, http)
-	resume(thread, http)
+	self.loop.resume(thread, http)
 	return true
 end
 
@@ -419,7 +398,7 @@ function client:request(t)
 
 	local waiting_response
 	if http.reading_response then
-		self:push_wait_response_thread(http, currentthread(), target)
+		self:push_wait_response_thread(http, self.loop.thread(), target)
 		waiting_response = true
 	else
 		http.reading_response = true
@@ -434,7 +413,7 @@ function client:request(t)
 	end
 
 	if waiting_response then
-		suspend()
+		self.loop.suspend()
 	end
 
 	local res, err, errtype = self:read_response_now(http, req)
@@ -451,7 +430,7 @@ function client:request(t)
 	if not http.closed then
 		local thread = self:pull_wait_response_thread(http, target)
 		if thread then
-			resume(thread)
+			self.loop.resume(thread)
 		end
 	end
 
@@ -469,6 +448,15 @@ function client:request(t)
 	end
 
 	return res, req
+end
+
+--downloading CA file --------------------------------------------------------
+
+function client:update_ca_file()
+	self:request{
+		host = 'curl.haxx.se',
+		uri = '/ca/cacert.pem',
+	}
 end
 
 --instantiation --------------------------------------------------------------

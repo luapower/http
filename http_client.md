@@ -1,16 +1,20 @@
 
 ## `local client = require'http_client'`
 
-HTTP 1.1 coroutine-based async client in Lua. Supports persistent connections,
-pipelining, gzip compression, multiple client IPs, resource limits,
+HTTP 1.1 coroutine-based async client in Lua. Supports https, gzip compression,
+persistent connections, pipelining, multiple client IPs, resource limits,
 auto-redirects, auto-retries, cookie jars, multi-level debugging, caching,
-cdata-buffer-based I/O.
+cdata-buffer-based I/O, so basically the ideal library for web scraping.
 
 GZip compression can be enabled with `client.http.zlib = require'zlib'`.
 
+Works with [socket2], [coro], [libtls], [bearssl], [bearssl_libtls] stack
+by default, but can also work with the old [socket], [socketoop], [luasec]
+stack if setting `USE_SOCKETLOOP = true` global before loading the module.
+
 ## Status
 
-<warn>Work-in-progress.<warn>
+<warn>Alpha<warn>
 
 ## API
 
@@ -59,6 +63,14 @@ The `opt` table can contain:
 connection options                options to pass to `http:new()`
 request options                   options to pass to `http:make_request()`
 `client_ip`                       client ip to bind to (optional)
+--------------------------------- --------------------------------------------
+
+`tls_options`                     TLS options
+`tls_options` can have:
+
+--------------------------------- --------------------------------------------
+`ca_file`                         CA file (defaults to `cacert.pem`)
+`insecure_noverifycert`           disable certificate validation
 --------------------------------- --------------------------------------------
 
 ### `client:close_all()`

@@ -3,7 +3,7 @@
 
 HTTP 1.1 client & server protocol in Lua.
 
-Works on an abstract I/O API made of three functions:
+Works over an user-provided I/O API made of three functions:
 
 	* `http:read(buf, maxsz) -> sz | nil,'closed'|err`
 	* `http:send(s | buf,sz) -> true | nil,err`
@@ -13,7 +13,7 @@ GZip compression can be enabled with `http.zlib = require'zlib'`.
 
 ## Status
 
-<warn>Work-in-progress.<warn>
+<warn>Alpha<warn>
 
 ## API
 
@@ -29,6 +29,14 @@ The table `opt` can contain:
 `port`                            server's port (optional; if client)
 `https`                           `true` if using TLS
 `max_line_size`                   change the HTTP line size limit
+--------------------------------- --------------------------------------------
+
+`tls_options`                     TLS options
+`tls_options` can have:
+
+--------------------------------- --------------------------------------------
+`ca_file`                         CA file (defaults to `cacert.pem`)
+`insecure_noverifycert`           disable certificate validation
 --------------------------------- --------------------------------------------
 
 ### Client-side API
