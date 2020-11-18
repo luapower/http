@@ -1,5 +1,5 @@
 
---secure sockets for http client and server protocols based on socketloop, luasocket, luasec.
+--secure sockets for http client and server protocols based on luasocket and luasec.
 --Written by Cosmin Apreutesei. Public Domain.
 
 local loop = require'socketloop'
@@ -44,34 +44,33 @@ end
 
 --http<->luasec binding ------------------------------------------------------
 
-function M.http_bind_tls(self, http, sock, vhost, mode, tls_options, class_tls_options)
+function M.http_bind_tls(self, http, tcp, vhost, mode)
 
 	local ssl = require'ssl'
 
 	assert(mode == 'client' or mode == 'server')
-	local opt = glue.update({}, class_tls_options, tls_options)
-	local ssock = ssl.wrap(sock, {
+	local stcp = ssl.wrap(tcp, {
 		mode     = mode,
 		protocol = 'any',
 		options  = {'all', 'no_sslv2', 'no_sslv3', 'no_tlsv1'},
-		verify   = opt.insecure_noverifycert and 'none' or 'peer',
-		cafile   = opt.ca_file,
+		verify   = self.tls_insecure_noverifycert and 'none' or 'peer',
+		cafile   = self.tls_ca_file,
 	})
-	ssock:sni(vhost)
-	sock:setsocket(ssock)
+	stcp:sni(vhost)
+	tcp:setsocket(stcp)
 	local ok, err
-	if sock.call_async then
-		ok, err = sock:call_async(sock.dohandshake, sock)
+	if tcp.call_async then
+		ok, err = tcp:call_async(tcp.dohandshake, tcp)
 	else
 		while true do
-			ok, err = ssock:dohandshake()
+			ok, err = stcp:dohandshake()
 			if ok or (err ~= 'wantread' and err ~= 'wantwrite') then
 				break
 			end
 		end
 	end
 	if not ok then
-		self:close()
+		http:close()
 		return nil, err
 	end
 	return true

@@ -1,5 +1,5 @@
 
---(secure) sockets for http client and server protocols based on socket2, libtls.
+--(secure) sockets for http client and server protocols based on socket2 and libtls.
 --Written by Cosmin Apreutesei. Public Domain.
 
 local socket = require'socket2'
@@ -37,28 +37,28 @@ end
 
 --http<->libtls binding ------------------------------------------------------
 
-local function load_file(self, kf, ks, t1, t0)
-	local t = t1[kf] and t1 or t0
-	t[ks] = t[ks] or assert(glue.readfile(t[kf]))
+local function load_file(self, kf, ks)
+	if self[ks] then return self[ks] end
+	local t = rawget(self, kf) and self or self.__index --load in instance or in class.
+	t[ks] = assert(glue.readfile(t[kf]))
 end
 
-function M.http_bind_tls(self, http, tcp, vhost, mode, tls_options, class_tls_options)
+function M.http_bind_tls(self, http, tcp, vhost, mode)
 
 	local stcp = require'socket2_libtls'
 
 	assert(mode == 'client' or mode == 'server')
 	if mode == 'client' then
-		load_file(self, 'ca_file', 'ca', tls_options, class_tls_options)
+		load_file(self, 'tls_ca_file', 'tls_ca')
 	end
-	local opt = glue.update({}, class_tls_options, tls_options)
 	local stcp, err = stcp.new(tcp, {
 		mode = mode,
-		ca = opt.ca,
+		ca = self.tls_ca,
 		servername = vhost,
-		insecure_noverifycert = opt.insecure_noverifycert,
+		insecure_noverifycert = self.tls_insecure_noverifycert,
 	})
 	if not stcp then
-		self:close()
+		http:close()
 		return nil, err
 	end
 	http:setsocket(stcp)

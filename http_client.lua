@@ -28,9 +28,7 @@ local client = {
 	max_cookie_length = 8192,
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
-	tls_options = {
-		ca_file = 'cacert.pem',
-	},
+	tls_ca_file = 'cacert.pem',
 }
 
 client.dbg = glue.noop
@@ -171,9 +169,7 @@ function client:connect_now(target)
 	self.loop.http_bind_socket(http, tcp)
 	self:dbg(target, ' BIND_SOCKET', '%s %s', tcp, http)
 	if http.https then
-		local t1 = self.tls_options
-		local t0 = self.__index.tls_options
-		local ok, err = self.loop.http_bind_tls(self, http, tcp, host, 'client', t1, t0)
+		local ok, err = self.loop.http_bind_tls(self, http, tcp, host, 'client')
 		self:dbg(target, ' BIND_TLS', '%s %s %s', http:getsocket(), http, err or '')
 		if not ok then
 			return nil, err
@@ -456,6 +452,7 @@ function client:update_ca_file()
 	self:request{
 		host = 'curl.haxx.se',
 		uri = '/ca/cacert.pem',
+		https = true,
 	}
 end
 

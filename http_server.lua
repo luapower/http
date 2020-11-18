@@ -1,7 +1,6 @@
 
 if not ... then require'http_server_test'; return end
 
-local loop = require'socketloop'
 local http = require'http'
 local uri = require'uri'
 local time = require'time'
@@ -17,8 +16,6 @@ end
 local server = {
 	type = 'http_server', http = http,
 }
-
-local server = {}
 
 server.dbg = glue.noop
 
@@ -45,7 +42,7 @@ function server:new(t)
 			if not ok then print(err) end
 		end
 	end
-	self.socket = loop.newserver(self.ip, self.port, handler)
+	self.socket = t.loop.newserver(self.ip, self.port, handler)
 end
 
 return server

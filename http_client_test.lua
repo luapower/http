@@ -1,10 +1,9 @@
 
---USE_SOCKETLOOP = true
+--USE_LUASOCKET = true
 
 local client = require'http_client'
 client.http.zlib = require'zlib'
-
-local loop = require(false and 'socket2_libtls_http' or 'socket_luasec_http')
+local loop = require(USE_LUASOCKET and 'http_socket_luasec' or 'http_socket2_libtls')
 local time = require'time'
 
 local function search_page_url(pn)
