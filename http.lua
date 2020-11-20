@@ -63,9 +63,16 @@ end
 
 --low-level API to implement -------------------------------------------------
 
-function http:close()           error'not implemented' end
-function http:read (buf, maxsz) error'not implemented' end
-function http:send (buf, sz)    error'not implemented' end
+function http:close()             error'not implemented' end
+function http:io_recv(buf, maxsz) error'not implemented' end
+function http:io_send(buf, sz)    error'not implemented' end
+
+function http:send(buf, sz)
+	local n = check_io(self:io_send(buf, sz))
+	if n < (sz or #buf) then
+		check_io(nil, 'short write')
+	end
+end
 
 --linebuffer-based read API --------------------------------------------------
 
@@ -100,7 +107,7 @@ http.max_line_size = 8192
 
 function http:create_linebuffer()
 	local function read(buf, sz)
-		return self:read(buf, sz)
+		return self:io_recv(buf, sz)
 	end
 	self.linebuffer = stream.linebuffer(read, '\r\n', self.max_line_size)
 end

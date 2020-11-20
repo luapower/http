@@ -41,7 +41,7 @@ for i=1,1 do
 			--close = true,
 			connect_timeout = 0.2,
 			request_timeout = 0.2,
-			reply_timeout = 0.5,
+			--reply_timeout = 2,
 		}
 		if res then
 			n = n + (res and res.content and #res.content or 0)

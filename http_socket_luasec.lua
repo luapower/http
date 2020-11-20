@@ -21,7 +21,7 @@ function M.http_bind_socket(http, sock)
 	function http:getsocket() return sock end
 	function http:setsocket(newsock) sock = newsock end
 
-	function http:read(buf, sz)
+	function http:io_recv(buf, sz)
 		local s, err, p = sock:receive(sz, nil, true)
 		if not s then return nil, err end
 		assert(#s <= sz)
@@ -29,7 +29,7 @@ function M.http_bind_socket(http, sock)
 		return #s
 	end
 
-	function http:send(buf, sz)
+	function http:io_send(buf, sz)
 		sz = sz or #buf
 		local s = ffi.string(buf, sz)
 		return sock:send(s)

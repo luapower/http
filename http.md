@@ -5,8 +5,8 @@ HTTP 1.1 client & server protocol in Lua.
 
 Works over an user-provided I/O API made of three functions:
 
-	* `http:read(buf, maxsz) -> sz | nil,'closed'|err`
-	* `http:send(s | buf,sz) -> true | nil,err`
+	* `http:io_recv(buf, maxlen) -> recv_len | nil,'closed'|err`
+	* `http:io_send(s | buf,len) -> sent_len | nil,err`
 	* `http:close()`
 
 GZip compression can be enabled with `http.zlib = require'zlib'`.
