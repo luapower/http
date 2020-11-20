@@ -21,7 +21,6 @@ local client = {
 	max_conn = 50,
 	max_conn_per_target = 20,
 	max_pipelined_requests = 10,
-	socket_timeout = 5,
 	client_ips = {},
 	max_retries = 0,
 	max_redirects = 20,
@@ -63,6 +62,7 @@ function client:target(t)
 	if not target.http_args then
 		target.type = 'http_target'
 		target.host = host
+		target.connect_timeout = t.connect_timeout
 		target.http_args = {
 			target = target,
 			port = port,
@@ -154,7 +154,9 @@ function client:connect_now(target)
 	local tcp, err = self.loop.tcp(client_ip)
 	if not tcp then return nil, err end
 	self:inc_conn_count(target)
-	local ok, err = tcp:connect(host, port)
+	local dt = target.connect_timeout
+	local expires = dt and time.clock() + dt or nil
+	local ok, err = tcp:connect(host, port, expires)
 	self:dbg(target, '+CONNECT', '%s %s', tcp, err or '')
 	if not ok then
 		self:dec_conn_count(target)
@@ -243,9 +245,9 @@ end
 function client:read_response_now(http, req)
 	http.reading_response = true
 	self:dbg(http.target, '+READ_RESPONSE', '%s.%s.%s', http.target, http, req)
-	local res, err, errtype = http:read_response(req)
-	self:dbg(http.target, '-READ_RESPONSE', '%s.%s.%s %s %s',
-		http.target, http, req, err or '', errtype or '')
+	local res, err, errtype, errcode = http:read_response(req)
+	self:dbg(http.target, '-READ_RESPONSE', '%s.%s.%s %s %s %s',
+		http.target, http, req, err or '', errtype or '', errcode or '')
 	http.reading_response = false
 	return res, err, errtype
 end
@@ -273,6 +275,9 @@ function client:redirect_request_args(t, req, res)
 		headers = glue.merge({['content-type'] = false}, t.headers),
 		receive_content = res.receive_content,
 		redirect_count = (t.redirect_count or 0) + 1,
+		connect_timeout = t.connect_timeout,
+		request_timeout = t.request_timeout,
+		reply_timeout   = t.reply_timeout,
 	}
 end
 

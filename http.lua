@@ -4,6 +4,7 @@
 
 if not ... then require'http_test'; return end
 
+local time = require'time'
 local glue = require'glue'
 local stream = require'stream'
 local http_headers = require'http_headers'
@@ -476,10 +477,14 @@ function http:make_request(t, cookies)
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
 	glue.update(req.headers, t.headers)
 	req.receive_content = t.receive_content
+	req.request_timeout = t.request_timeout
+	req.reply_timeout   = t.reply_timeout
 	return req
 end
 
 function http:send_request(req)
+	local dt = req.request_timeout
+	self.send_expires = dt and time.clock() + dt or nil
 	self:send_request_line(req.method, req.uri, req.http_version)
 	self:send_headers(req.headers)
 	self:send_body(req.content, req.content_size,
@@ -550,6 +555,9 @@ end
 function http:read_response(req)
 	local res = {}
 	res.rawheaders = {}
+
+	local dt = req.reply_timeout
+	self.read_expires = dt and time.clock() + dt or nil
 
 	res.http_version, res.status = self:read_status_line()
 

@@ -21,11 +21,11 @@ function M.http_bind_socket(http, sock)
 	function http:setsocket(newsock) sock = newsock end
 
 	function http:read(buf, sz)
-		return sock:recv(buf, sz)
+		return sock:recv(buf, sz, self.read_expires)
 	end
 
 	function http:send(buf, sz)
-		return sock:send(buf, sz)
+		return sock:send(buf, sz, self.send_expires)
 	end
 
 	function http:close()

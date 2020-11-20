@@ -39,7 +39,9 @@ for i=1,1 do
 			debug = {protocol = true, stream = false},
 			--max_line_size = 1024,
 			--close = true,
-
+			connect_timeout = 0.2,
+			request_timeout = 0.2,
+			reply_timeout = 0.5,
 		}
 		if res then
 			n = n + (res and res.content and #res.content or 0)

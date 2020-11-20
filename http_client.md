@@ -4,7 +4,7 @@
 HTTP 1.1 coroutine-based async client in Lua. Supports https, gzip compression,
 persistent connections, pipelining, multiple client IPs, resource limits,
 auto-redirects, auto-retries, cookie jars, multi-level debugging, caching,
-cdata-buffer-based I/O, so basically the ideal I/O library for web scraping.
+and cdata-buffer-based I/O. In short, the best library for web scraping.
 
 For I/O & TLS you can use [socket2] with [libtls] or [socket] with [luasec]
 (see `loop` option below).
