@@ -23,8 +23,6 @@ GZip compression can be enabled with `client.http.zlib = require'zlib'`.
 `client:close_all()`              close all connections
 --------------------------------- --------------------------------------------
 
-### `client:new(opt) -> client`
-
 ------------------------ -----------------------------------------------------
 `loop`                   the socket/TLS API to use (note 1)
 `max_conn`               limit the number of total connections
