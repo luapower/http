@@ -25,8 +25,6 @@ GZip compression can be enabled with `client.http.zlib = require'zlib'`.
 
 ### `client:new(opt) -> client`
 
-Create a client object. The `opt` table can contain:
-
 ------------------------ -----------------------------------------------------
 `loop`                   the socket/TLS API to use (note 1)
 `max_conn`               limit the number of total connections
@@ -38,20 +36,6 @@ Create a client object. The `opt` table can contain:
 `debug`                  `true` to enable client-level debugging
 `tls_options`            TLS options
 ------------------------ -----------------------------------------------------
-
-Note 1: for `loop` use `loop = require'http_socket_luasec'`
-or `loop = require'http_socket2_libtls'` depending on which socket/TLS
-stack you have available.
-
-Note 2: A _target_ is a combination of (vhost, port, client_ip) on which one or more
-HTTP connections can be created subject to per-target limits.
-
-The `tls_options` table can contain:
-
---------------------------------- --------------------------------------------
-`ca_file`                         CA file (defaults to `cacert.pem`)
-`insecure_noverifycert`           disable certificate validation
---------------------------------- --------------------------------------------
 
 #### Pipelined requests
 
