@@ -68,9 +68,9 @@ function http:io_recv(buf, maxsz) error'not implemented' end
 function http:io_send(buf, sz)    error'not implemented' end
 
 function http:send(buf, sz)
-	local n = check_io(self:io_send(buf, sz))
-	if n < (sz or #buf) then
-		check_io(nil, 'short write')
+	local left = sz or #buf
+	while left > 0 do
+		left = left - check_io(self:io_send(buf, sz))
 	end
 end
 

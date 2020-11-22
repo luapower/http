@@ -3,6 +3,7 @@
 --Written by Cosmin Apreutesei. Public Domain.
 
 local socket = require'socket2'
+local glue = require'glue'
 
 local M = {}
 
