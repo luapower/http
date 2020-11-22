@@ -65,7 +65,7 @@ pipelined responses come serialized and also the server might decide not
 to start processing pipelined requests as soon as they arrive because it
 would have to buffer the results before it can start sending them.
 
-### `client:request(opt) -> req, res`   make a HTTP request
+### `client:request(opt) -> req, res`
 
 Make a HTTP request. This must be called from a scheduled socket thread.
 
