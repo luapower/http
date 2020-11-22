@@ -29,13 +29,21 @@ Create a client object. The `opt` table can contain:
 
 ------------------------- ----------------------------------------------------------------
 `loop`                    the socket/TLS API to use (note 1)
+
 `max_conn`                limit the number of total connections
+
 `max_conn_per_target`     limit the number of connections per _target_ (note 2)
+
 `max_pipelined_requests`  limit the number of pipelined requests
+
 `client_ips`              a list of client IPs to assign to requests
+
 `max_retries`             number of retries before giving up
+
 `max_redirects`           number of redirects before giving up
+
 `debug`                   `true` to enable client-level debugging
+
 `tls_options`             TLS options
 ------------------------- ----------------------------------------------------------------
 
