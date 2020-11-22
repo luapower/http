@@ -28,7 +28,7 @@ GZip compression can be enabled with `client.http.zlib = require'zlib'`.
 Create a client object. The `opt` table can contain:
 
 ------------------------ -----------------------------------------------------
-aaa                      bbb
+`loop`                   the socket/TLS API to use (note 1)
 ------------------------ -----------------------------------------------------
 
 Note 1: for `loop` use `loop = require'http_socket_luasec'`
