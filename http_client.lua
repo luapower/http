@@ -163,7 +163,7 @@ function client:connect_now(target)
 		return nil, err
 	end
 	glue.after(tcp, 'close', function(tcp)
-		self:dbg(target, '-DISCONNECT', '%s', tcp)
+		self:dbg(target, '-CLOSE', '%s', tcp)
 		self:dec_conn_count(target)
 		self:resume_next_wait_conn_thread()
 	end)

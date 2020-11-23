@@ -29,7 +29,7 @@ local client = client:new{
 local n = 0
 for i=1,1 do
 	loop.newthread(function()
-		local res, req = client:request{
+		local res, req, err_class = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			host = 'luapower.com', uri = '/',
 			--https = true,
@@ -39,9 +39,9 @@ for i=1,1 do
 			debug = {protocol = true, stream = false},
 			--max_line_size = 1024,
 			--close = true,
-			connect_timeout = 0.2,
-			request_timeout = 0.2,
-			reply_timeout = .5,
+			connect_timeout = 0.5,
+			request_timeout = 0.5,
+			reply_timeout = 0.3,
 		}
 		if res then
 			n = n + (res and res.content and #res.content or 0)

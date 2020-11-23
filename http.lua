@@ -30,7 +30,10 @@ local error_class = {
 local function checker(error_class, v, err)
 	return function(v, err)
 		if v then return v end
-		error(setmetatable({message = err}, error_class))
+		error(setmetatable({
+				message = err,
+				--traceback = debug.traceback('\n'..err),
+			}, error_class))
 	end
 end
 local check = checker(error_class.protocol)
@@ -49,7 +52,7 @@ local function pass(self, ok, ...)
 	local err = ...
 	local error_class = getmetatable(err)
 	if error_class and error_class.id then
-		return nil, err.message or error_class.id, error_class.id
+		return nil, err.message or error_class.id, error_class.id --, err.traceback
 	else
 		error(err, 2)
 	end
