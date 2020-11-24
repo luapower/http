@@ -1,12 +1,26 @@
 
 ## `local client = require'http_client'`
 
-HTTP 1.1 coroutine-based async client in Lua. Supports https, gzip compression,
-persistent connections, pipelining, multiple client IPs, resource limits,
-auto-redirects, auto-retries, cookie jars, multi-level debugging, caching,
-and cdata-buffer-based I/O. In short, the best library for web scraping.
+HTTP 1.1 coroutine-based async client in Lua.
 
-For I/O & TLS you can use [socket2] with [libtls] or [socket] with [luasec]
+## Features
+
+	* https
+	* gzip compression
+	* persistent connections
+	* pipelining
+	* multiple client IPs
+	* resource limits
+	* auto-redirects
+	* auto-retries
+	* cookie jars
+	* multi-level debugging
+	* caching
+	* cdata-buffer-based I/O.
+
+In short, your dream library for web scraping.
+
+Uses [socket2] and [libtls] for I/O and TLS or you can bring your own stack
 (see `loop` option below).
 
 GZip compression can be enabled with `client.http.zlib = require'zlib'`.
@@ -39,9 +53,7 @@ Create a client object. The `opt` table can contain:
 `tls_options`             TLS options
 ------------------------- ---
 
-Note 1: for `loop` use `loop = require'http_socket_luasec'`
-or `loop = require'http_socket2_libtls'` depending on which socket/TLS
-stack you have available.
+Note 1: for `loop` use `loop = require'http_socket2_libtls'`.
 
 Note 2: A _target_ is a combination of (vhost, port, client_ip) on which one or more
 HTTP connections can be created subject to per-target limits.
