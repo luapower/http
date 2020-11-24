@@ -88,3 +88,4 @@ The `opt` table can contain:
 #### `http:send_response(res) -> true | nil,err,errtype`
 
 Send a response.
+
