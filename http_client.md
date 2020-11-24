@@ -5,18 +5,18 @@ HTTP 1.1 coroutine-based async client in Lua.
 
 ## Features
 
-	* https
-	* gzip compression
-	* persistent connections
-	* pipelining
-	* multiple client IPs
-	* resource limits
-	* auto-redirects
-	* auto-retries
-	* cookie jars
-	* multi-level debugging
-	* caching
-	* cdata-buffer-based I/O.
+ * https
+ * gzip compression
+ * persistent connections
+ * pipelining
+ * multiple client IPs
+ * resource limits
+ * auto-redirects
+ * auto-retries
+ * cookie jars
+ * multi-level debugging
+ * caching
+ * cdata-buffer-based I/O.
 
 In short, your dream library for web scraping.
 
