@@ -13,6 +13,7 @@ M.resume    = socket.resume
 M.thread    = socket.thread
 M.newthread = socket.newthread
 M.start     = socket.start
+M.sleep     = socket.sleep
 
 --http<->socket2 binding -----------------------------------------------------
 

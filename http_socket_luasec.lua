@@ -13,6 +13,7 @@ M.resume    = loop.resume
 M.thread    = loop.current
 M.newthread = loop.newthread
 M.start     = loop.start
+M.sleep     = function() end
 
 --http<->luasocket binding ---------------------------------------------------
 

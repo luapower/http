@@ -29,6 +29,8 @@ local client = client:new{
 local n = 0
 for i=1,1 do
 	loop.newthread(function()
+		print('sleep 1')
+		loop.sleep(1)
 		local res, req, err_class = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			host = 'luapower.com', uri = '/',
