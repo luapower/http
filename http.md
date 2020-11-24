@@ -11,6 +11,9 @@ Works over an user-provided I/O API made of three functions:
 
 GZip compression can be enabled with `http.zlib = require'zlib'`.
 
+This module only implements the HTTP protocol. For a working HTTP client
+and server based on this module, see [http_client] and [http_server].
+
 ## Status
 
 <warn>Alpha<warn>

@@ -29,8 +29,8 @@ local client = client:new{
 local n = 0
 for i=1,1 do
 	loop.newthread(function()
-		print('sleep 1')
-		loop.sleep(1)
+		print('sleep .5')
+		loop.sleep(.5)
 		local res, req, err_class = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			host = 'luapower.com', uri = '/',
@@ -48,12 +48,14 @@ for i=1,1 do
 		if res then
 			n = n + (res and res.content and #res.content or 0)
 		else
+			print('sleep .5')
+			loop.sleep(.5)
 			print('ERROR:', req)
 		end
 	end)
 end
 local t0 = time.clock()
-loop.start(5)
+loop.start()
 t1 = time.clock()
 print(mbytes(n / (t1 - t0))..'/s')
 

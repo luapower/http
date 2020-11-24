@@ -75,6 +75,9 @@ The `opt` table can contain:
 connection options                options to pass to `http:new()`
 request options                   options to pass to `http:make_request()`
 `client_ip`                       client ip to bind to (optional)
+`connect_timeout`                 connect timeout (optional)
+`request_timeout`                 timeout for the request part (optional)
+`reply_timeout`                   timeout for the reply part (optional)
 --------------------------------- --------------------------------------------
 
 ### `client:close_all()`
