@@ -2,7 +2,7 @@
 -- HTTP 1.1 client & server protocol in Lua.
 -- Written by Cosmin Apreutesei. Public Domain.
 
-if not ... then require'http_test'; return end
+if not ... then require'http_server_test'; return end
 
 local time = require'time'
 local glue = require'glue'
@@ -32,7 +32,7 @@ local function checker(error_class, v, err)
 		if v then return v end
 		error(setmetatable({
 				message = err,
-				--traceback = debug.traceback('\n'..err),
+				traceback = debug.traceback(err and '\n'..err or ''),
 			}, error_class))
 	end
 end
@@ -52,7 +52,7 @@ local function pass(self, ok, ...)
 	local err = ...
 	local error_class = getmetatable(err)
 	if error_class and error_class.id then
-		return nil, err.message or error_class.id, error_class.id --, err.traceback
+		return nil, err.message or err.traceback or error_class.id, error_class.id --, err.traceback
 	else
 		error(err, 2)
 	end
@@ -64,17 +64,19 @@ function http:protect(method)
 	end
 end
 
---low-level API to implement -------------------------------------------------
-
-function http:close()             error'not implemented' end
-function http:io_recv(buf, maxsz) error'not implemented' end
-function http:io_send(buf, sz)    error'not implemented' end
+--low-level I/O API ----------------------------------------------------------
 
 function http:send(buf, sz)
 	local left = sz or #buf
 	while left > 0 do
-		left = left - check_io(self:io_send(buf, sz))
+		left = left - check_io(self.tcp:send(buf, sz, self.send_expires))
 	end
+end
+
+function http:close()
+	if self.closed then return end
+	self.tcp:close()
+	self.closed = true
 end
 
 --linebuffer-based read API --------------------------------------------------
@@ -110,7 +112,7 @@ http.max_line_size = 8192
 
 function http:create_linebuffer()
 	local function read(buf, sz)
-		return self:io_recv(buf, sz)
+		return self.tcp:recv(buf, sz, self.read_expires)
 	end
 	self.linebuffer = stream.linebuffer(read, '\r\n', self.max_line_size)
 end
@@ -190,7 +192,7 @@ function http:send_request_line(method, uri, http_version)
 	assert(http_version == '1.1' or http_version == '1.0')
 	assert(method and method == method:upper())
 	assert(uri)
-	self:dbg('=>', '%s %s %s', method, uri, http_version)
+	self:dbg('=>', '%s %s HTTP/%s', method, uri, http_version)
 	self:send(_('%s %s HTTP/%s\r\n', method, uri, http_version))
 	return true
 end
@@ -198,7 +200,7 @@ end
 function http:read_request_line()
 	local method, uri, http_version =
 		self:read_line():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
-	self:dbg('<-', '%s %s %s', method, uri, http_version)
+	self:dbg('<-', '%s %s HTTP/%s', method, uri, http_version)
 	check(method, 'invalid request line')
 	return http_version, method, uri
 end
@@ -211,7 +213,7 @@ function http:send_status_line(status, message, http_version)
 	assert(http_version == '1.1' or http_version == '1.0')
 	local s = _('HTTP/%s %d %s\r\n', http_version, status, message)
 	self:dbg('=>', '%s %s %s', status, message, http_version)
-	self:send()
+	self:send(s)
 end
 
 function http:read_status_line()
@@ -298,7 +300,7 @@ end
 
 function http:set_body_headers(headers, content, content_size, close)
 	if type(content) == 'string' then
-		assert(not content_size, 'content_size ignored')
+		assert(not content_size, 'content_size would be ignored')
 		headers['content-length'] = #content
 	elseif type(content) == 'cdata' then
 		headers['content-length'] = assert(content_size, 'content_size missing')
@@ -340,7 +342,7 @@ function http:send_chunked(read_content)
 		if chunk then
 			local len = len or #chunk
 			total = total + len
-			seld:dbg('>>', '%7d bytes; chunk %d', len, chunk_num)
+			self:dbg('>>', '%7d bytes; chunk %d', len, chunk_num)
 			self:send(_('%X\r\n', len))
 			self:send(chunk, len)
 			self:send'\r\n'
@@ -383,23 +385,20 @@ function http:zlib_encoder(format, content, content_size)
 	if type(content) == 'string' then
 		return self.zlib.deflate(content, '', nil, format)
 	elseif type(content) == 'cdata' then
+		--TODO: avoid string creation
 		return self.zlib.deflate(ffi.string(content, content_size), '', nil, format)
 	else
 		return coroutine.wrap(function()
+			--TODO: avoid string creation
 			self.zlib.deflate(content, coroutine.yield, nil, format)
 		end)
 	end
 end
 
-function http:send_body(content, content_size, content_encoding, transfer_encoding)
+function http:send_body(content, content_size, transfer_encoding)
 	if not content then
 		self:dbg('  ', '')
 		return
-	end
-	if content_encoding == 'gzip' or content_encoding == 'deflate' then
-		content, content_size = self:zlib_encoder(content_encoding, content, content_size)
-	elseif content_encoding then
-		assert(false, 'invalid content-encoding')
 	end
 	if transfer_encoding == 'chunked' then
 		self:send_chunked(content)
@@ -463,32 +462,43 @@ end
 
 function http:make_request(t, cookies)
 	local req = {http = self, type = 'http_request'}
+
 	req.http_version = t.http_version or '1.1'
 	req.method = t.method or 'GET'
 	req.uri = t.uri or '/'
+
 	req.headers = {}
+
 	assert(t.host, 'host missing') --required, even for HTTP/1.0.
 	local default_port = self.https and 443 or 80
 	local port = self.port ~= default_port and self.port or nil
 	req.headers['host'] = {host = t.host, port = port}
+
 	req.close = t.close or req.http_version == '1.0'
 	if req.close then
 		req.headers['connection'] = 'close'
 	end
+
 	if self.zlib then
 		req.headers['accept-encoding'] = 'gzip, deflate'
 	end
+
 	req.headers['cookie'] = cookies
-	req.content = t.content
-	req.content_size = t.content_size
-	if t.content and self.zlib and t.compress ~= false then
+
+	req.content, req.content_size = t.content, t.content_size
+	if req.content and self.zlib and t.compress ~= false then
 		req.headers['content-encoding'] = 'gzip'
+		req.content, req.content_size =
+			self:encode_content(req.content, req.content_size, 'gzip')
 	end
+
 	self:set_body_headers(req.headers, req.content, req.content_size, req.close)
 	glue.update(req.headers, t.headers)
+
 	req.receive_content = t.receive_content
 	req.request_timeout = t.request_timeout
 	req.reply_timeout   = t.reply_timeout
+
 	return req
 end
 
@@ -497,9 +507,7 @@ function http:send_request(req)
 	self.send_expires = dt and time.clock() + dt or nil
 	self:send_request_line(req.method, req.uri, req.http_version)
 	self:send_headers(req.headers)
-	self:send_body(req.content, req.content_size,
-		req.headers['content-encoding'],
-		req.headers['transfer-encoding'])
+	self:send_body(req.content, req.content_size, req.headers['transfer-encoding'])
 	return true
 end
 http:protect'send_request'
@@ -619,149 +627,98 @@ function http:read_request(receive_content)
 end
 http:protect'read_request'
 
-function http:no_body(res, status)
+local function content_size(opt)
+	return type(opt.content) == 'string' and #opt.content
+		or opt.content_size
+end
+
+local function no_body(res, status)
 	res.status = status
 	res.content, res.content_size = ''
-	return false
 end
 
-local zlib_encodings = {gzip = true, deflate = true}
-local default_encodings = {}
+local function q0(t)
+	return type(t) == 'table' and t.q == 0
+end
 
-function http:negotiate_content_encoding(req, compress)
+function http:accept_content_encoding(req, opt)
+	local compress = opt.compress ~= false and self.zlib
+		and (content_size(opt) or 0) >= 1000
 	local accept = req.headers['accept-encoding']
-	if not accept then
-		return 'identity'
+	if accept then
+		if compress and not q0(accept.gzip) then return true, 'gzip' end
+		if compress and not q0(accept.deflate) then return true, 'deflate' end
 	end
-	local available = compress and self.zlib
-		and zlib_encodings or default_encodings
-
-	local function cmp_qs(enc1, enc2)
-		local q1 = accept[enc1].q or 1
-		local q2 = accept[enc2].q or 1
-		return q1 < q2
-	end
-	local allow_identity = true
-	for encoding, params in glue.sortedpairs(accept, cmp_qs) do
-		local q = type(params) == 'table' and params.q or 1
-		if q > 0 then
-			if available[encoding] then
-				return encoding
-			end
-		elseif encoding == 'identity' or encoding == '*' then
-			allow_identity = false
-		end
-	end
-	return allow_identity and 'identity' or nil
+	return true
 end
 
-function http:accept_content_encoding(res, compress)
-	local content_encoding = self:negotiate_content_encoding(res.request, compress)
-	if not content_encoding then
-		return self:no_body(res, 406) --not acceptable
-	elseif content_encoding ~= 'identity' then
-		res.headers['content-encoding'] = content_encoding
-		return true
-	end
-end
-
-function http:allow_method(res, allowed_methods)
-	if not allowed_methods[res.request.method] then
-		res.headers['allow'] = allowed_methods
-		return self:no_body(res, 405) --method not allowed
+function http:encode_content(content, content_size, content_encoding)
+	if content_encoding == 'gzip' or content_encoding == 'deflate' then
+		content, content_size =
+			self:zlib_encoder(content_encoding, content, content_size)
 	else
-		return true
+		assert(not content_encoding, 'invalid content-encoding')
 	end
+	return content, content_size
 end
 
-function http:negotiate_content_type(req, available)
-	local accept = req.headers['accept']
-	if not accept then
-		return available[1]
-	end
-	local function cmp_qs(mt1, mt2)
-		return accept[mt1] < accept[mt2]
-	end
-	local avail = glue.index(available)
-	local function cmp_qs(enc1, enc2)
-		local q1 = accept[enc1].q or 1
-		local q2 = accept[enc2].q or 1
-		if q1 < q2 then return true end
-		local i1 = avail[enc1]
-		local i2 = avail[enc2]
-		return i1 < i2
-	end
-	local function accepts(wildcard, mediatype)
-		if type(mediatype) == 'table' then
-			for mediatype in pairs(mediatype) do
-				if accepts(wildcard, mediatype) then
-					return mediatype
-				end
-			end
-		elseif wildcard == '*/*' then
-			return mediatype
-		elseif wildcard:find'/%*$' then
-			return mediatype:match'^[^/]+' == wildcard:match'^[^/]+'
-		else
-			return wildcard == mediatype
-		end
-	end
-	for wildcard, params in glue.sortedpairs(accept, cmp_qs) do
-		local q = type(params) == 'table' and params.q or 1
-		if q > 0 then
-			return accepts(wildcard, available)
-		end
-	end
-	return false
+function http:allow_method(req, opt)
+	local allowed_methods = opt.allowed_methods
+	return not allowed_methods or allowed_methods[req.method], allowed_methods
 end
 
-function http:accept_content_type(res, available)
-	local content_type = self:negotiate_content_type(res.request, available)
-	if not content_type then
-		return self:no_body(res, 406) --not acceptable
-	else
-		res.headers['content-type'] = content_type
-		return true
-	end
+function http:accept_content_type(req, opt)
+	return true, opt.content_type
 end
 
-function http:make_response(req, t, utc_time)
+function http:make_response(req, opt, utc_time)
 	local res = {http = self, request = req, type = 'http_response'}
 	res.headers = {}
 
-	res.http_version = t.http_version or req.http_version
+	res.http_version = opt.http_version or req.http_version
 
-	res.close = t.close or req.close
+	res.close = opt.close or req.close
 	if res.close then
 		res.headers['connection'] = 'close'
 	end
 
-	if t.status then
-		res.status = t.status
-		res.status_message = t.status_message
+	if opt.status then
+		res.status = opt.status
+		res.status_message = opt.status_message
 	else
 		res.status = 200
 	end
 
-	if t.allowed_methods and not self:allow_method(res, t.allowed_methods) then
-		return false
+	local allow, methods = self:allow_method(req, opt)
+	if not allow then
+		res.headers['allow'] = methods
+		no_body(res, 405) --method not allowed
+		return res
 	end
-	if not self:accept_content_encoding(res, t.compress ~= false) then
-		return false
+
+	local accept, content_encoding = self:accept_content_encoding(req, opt)
+	if not accept then
+		no_body(res, 406) --not acceptable
+		return res
+	else
+		res.headers['content-encoding'] = content_encoding
 	end
-	if t.content_type or t.content_types then
-		local content_types = t.content_types or {t.content_type}
-		if not self:accept_content_type(res, content_types) then
-			return false
-		end
+
+	local accept, content_type = self:accept_content_type(req, opt)
+	if not accept then
+		no_body(res, 406) --not acceptable
+		return res
+	else
+		res.headers['content-type'] = content_type
 	end
+
+	res.content, res.content_size =
+		self:encode_content(opt.content, opt.content_size, content_encoding)
 
 	res.headers['date'] = utc_time
 
-	res.content = t.content
-	res.content_size = t.content_size
 	self:set_body_headers(res.headers, res.content, res.content_size, res.close)
-	glue.update(res.headers, t.headers)
+	glue.update(res.headers, opt.headers)
 
 	return res
 end
@@ -769,9 +726,7 @@ end
 function http:send_response(res)
 	self:send_status_line(res.status, res.status_message, res.http_version)
 	self:send_headers(res.headers)
-	self:send_body(res.content, res.content_size,
-		res.headers['content-encoding'],
-		res.headers['transfer-encoding'])
+	self:send_body(res.content, res.content_size, res.headers['transfer-encoding'])
 	if res.close then
 		self:close()
 	end
@@ -788,7 +743,6 @@ function http:new(t)
 		dbg:install_to_http(self)
 	end
 	self:create_linebuffer()
-	self:dbg('CO', 'port:%d', self.port)
 	return self
 end
 

@@ -18,6 +18,7 @@ end
 
 local client = {
 	type = 'http_client', http = http,
+	loadfile = glue.readfile,
 	max_conn = 50,
 	max_conn_per_target = 20,
 	max_pipelined_requests = 10,
@@ -27,7 +28,9 @@ local client = {
 	max_cookie_length = 8192,
 	max_cookies = 1e6,
 	max_cookies_per_host = 1000,
-	tls_ca_file = 'cacert.pem',
+	tls_options = {
+		ca_file = 'cacert.pem',
+	},
 }
 
 client.dbg = glue.noop
@@ -52,21 +55,21 @@ function client:assign_client_ip(host, port)
 	return self.client_ips[i]
 end
 
-function client:target(t)
+function client:target(t) --t is request options
 	local host = assert(t.host, 'host missing'):lower()
 	local https = t.https and true or false
 	local port = t.port and assert(tonumber(t.port), 'invalid port')
 		or (https and 443 or 80)
 	local client_ip = t.client_ip or self:assign_client_ip(host, port)
 	local target = self.targets(host, port, client_ip)
-	if not target.http_args then
+	if not target.type then
 		target.type = 'http_target'
 		target.host = host
+		target.client_ip = client_ip
 		target.connect_timeout = t.connect_timeout
 		target.http_args = {
 			target = target,
 			port = port,
-			client_ip = client_ip,
 			https = https,
 			max_line_size = t.max_line_size,
 			debug = t.debug,
@@ -74,8 +77,6 @@ function client:target(t)
 		target.max_pipelined_requests = t.max_pipelined_requests
 		target.max_conn = t.max_conn_per_target
 		target.max_redirects = t.max_redirects
-	else
-		assert(https == target.http_args.https)
 	end
 	return target
 end
@@ -149,42 +150,61 @@ function client:can_connect_now(target)
 	return can
 end
 
+function client:stcp_options(host, port)
+	if not self._tls_config then
+		local opt = glue.update({}, self.tls_options)
+		for k,v in pairs(opt) do
+			if glue.ends(k, '_file') then
+				opt[k:gsub('_file$', '')] = assert(self.loadfile(v))
+				opt[k] = nil
+			end
+		end
+		self._tls_config = self.stcp_config(opt)
+	end
+	return self._tls_config
+end
+
 function client:connect_now(target)
 	local host, port, client_ip = target()
-	local tcp, err = self.loop.tcp(client_ip)
-	if not tcp then return nil, err end
+	local tcp, err, errcode = self.tcp()
+	if not tcp then return nil, err, errcode end
+	if client_ip then
+		local ok, err, errcode = tcp:bind(client_ip)
+		if not ok then return nil, err, errcode end
+	end
 	self:inc_conn_count(target)
 	local dt = target.connect_timeout
 	local expires = dt and time.clock() + dt or nil
-	local ok, err = tcp:connect(host, port, expires)
+	local ok, err, errcode = tcp:connect(host, port, expires)
 	self:dbg(target, '+CONNECT', '%s %s', tcp, err or '')
 	if not ok then
 		self:dec_conn_count(target)
-		return nil, err
+		return nil, err, errcode
 	end
 	glue.after(tcp, 'close', function(tcp)
 		self:dbg(target, '-CLOSE', '%s', tcp)
 		self:dec_conn_count(target)
 		self:resume_next_wait_conn_thread()
 	end)
-	local http = http:new(target.http_args)
-	self.loop.http_bind_socket(http, tcp)
-	self:dbg(target, ' BIND_SOCKET', '%s %s', tcp, http)
-	if http.https then
-		local ok, err = self.loop.http_bind_tls(self, http, tcp, host, 'client')
-		self:dbg(target, ' BIND_TLS', '%s %s %s', http:getsocket(), http, err or '')
-		if not ok then
-			return nil, err
+	if target.http_args.https then
+		local stcp, err, errcode = self.stcp(tcp, host, self:stcp_options(host, port))
+		self:dbg(target, ' TLS', '%s %s %s', stcp, http, err or '')
+		if not stcp then
+			return nil, err, errcode
 		end
+		tcp = stcp
 	end
+	target.http_args.tcp = tcp
+	local http = http:new(target.http_args)
+	self:dbg(target, ' HTTP_BIND', '%s %s', tcp, http)
 	return http
 end
 
 function client:wait_conn(target)
-	local thread = self.loop.thread()
+	local thread = self.currentthread()
 	self:push_wait_conn_thread(thread, target)
 	self:dbg(target, '=WAIT_CONN', '%s %s', thread, target)
-	local http = self.loop.suspend()
+	local http = self.suspend()
 	if http == 'connect' then
 		return self:connect_now(target)
 	else
@@ -206,14 +226,14 @@ function client:resume_next_wait_conn_thread()
 	local thread, target = self:pull_wait_conn_thread()
 	if not thread then return end
 	self:dbg(target, '^WAIT_CONN', '%s', thread)
-	self.loop.resume(thread, 'connect')
+	self.resume(thread, 'connect')
 end
 
 function client:resume_matching_wait_conn_thread(target, http)
 	local thread = self:pull_matching_wait_conn_thread(target)
 	if not thread then return end
 	self:dbg(target, '^WAIT_CONN', '%s < %s', thread, http)
-	self.loop.resume(thread, http)
+	self.resume(thread, http)
 	return true
 end
 
@@ -278,6 +298,7 @@ function client:redirect_request_args(t, req, res)
 		connect_timeout = t.connect_timeout,
 		request_timeout = t.request_timeout,
 		reply_timeout   = t.reply_timeout,
+		debug = t.debug,
 	}
 end
 
@@ -399,7 +420,7 @@ function client:request(t)
 
 	local waiting_response
 	if http.reading_response then
-		self:push_wait_response_thread(http, self.loop.thread(), target)
+		self:push_wait_response_thread(http, self.currentthread(), target)
 		waiting_response = true
 	else
 		http.reading_response = true
@@ -414,7 +435,7 @@ function client:request(t)
 	end
 
 	if waiting_response then
-		self.loop.suspend()
+		self.suspend()
 	end
 
 	local res, err, errtype = self:read_response_now(http, req)
@@ -431,7 +452,7 @@ function client:request(t)
 	if not http.closed then
 		local thread = self:pull_wait_response_thread(http, target)
 		if thread then
-			self.loop.resume(thread)
+			self.resume(thread)
 		end
 	end
 

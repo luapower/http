@@ -1,10 +1,12 @@
 
 local ffi = require'ffi'
 local time = require'time'
-local loop = require'socketloop'
 local glue = require'glue'
 local attr = glue.attr
 local _ = string.format
+
+--local loop = require'socketloop'
+local currentthread = require'socket2'.thread
 
 local dbg = {getaddr = {}, is = {}, prefixes = {}}
 function dbg.is.thread(t)
@@ -95,9 +97,8 @@ function dbg:install_to_http(http)
 	local dbg = self
 
 	local function D(tag, cmd, s)
-		local sock = http.getsocket and http:getsocket()
-		local S = dbg:id(sock) or '-'
-		local T = dbg:id(loop.current()) or 'M'
+		local S = dbg:id(http.tcp) or '-'
+		local T = dbg:id(currentthread()) or 'TM'
 		local t1, dt = dbg:clock(tag)
 		print(_('%6.2fs %5.2fs %-4s %-4s %s %s', t1, dt, T, S, cmd, s))
 	end
@@ -118,39 +119,53 @@ function dbg:install_to_http(http)
 
 	if http.debug.stream then
 
-		glue.after(http, 'bind_luasocket', function()
+		local P = function(cmd, s)
+			local len = s and _('%5d', #s) or '     '
+			local s = s and s
+				:gsub('\r\n', '\n'..(' '):rep(34))
+				:gsub('\n%s*$', '')
+				:gsub('[%z\1-\9\11-\31\128-\255]', '.') or ''
+			D('stream', cmd, _('%s %s', len, s))
+		end
 
-			local P = function(cmd, s)
-				local len = s and _('%5d', #s) or '     '
-				local s = s and s
-					:gsub('\r\n', '\n'..(' '):rep(34))
-					:gsub('\n%s*$', '')
-					:gsub('[%z\1-\9\11-\31\128-\255]', '.') or ''
-				D('stream', cmd, _('%s %s', len, s))
-			end
-
-			glue.override(http, 'read', function(inherited, self, buf, maxsz)
-				local sz, err = inherited(self, buf, maxsz)
-				if not sz then return nil, err end
-				P(' <', ffi.string(buf, sz))
-				return sz
-			end)
-
-			glue.override(http, 'send', function(inherited, self, buf, maxsz)
-				local sz, err = inherited(self, buf, maxsz)
-				if not sz then return nil, err end
-				P(' >', ffi.string(buf, sz))
-				return sz
-			end)
-
-			glue.after(http, 'close', function(self)
-				P('CC')
-				dbg:reset_clock'stream'
-			end)
-
+		glue.override(http.tcp, 'recv', function(inherited, self, buf, ...)
+			local sz, err = inherited(self, buf, ...)
+			if not sz then return nil, err end
+			P(' <', ffi.string(buf, sz))
+			return sz
 		end)
+
+		glue.override(http.tcp, 'send', function(inherited, self, buf, ...)
+			local sz, err = inherited(self, buf, ...)
+			if not sz then return nil, err end
+			P(' >', ffi.string(buf, sz))
+			return sz
+		end)
+
+		glue.after(http.tcp, 'close', function(self)
+			P('CC')
+			dbg:reset_clock'stream'
+		end)
+
 	end
 
+end
+
+function dbg:format(fmt, ...)
+	if not fmt then
+		return ''
+	end
+	local args = glue.pack(...)
+	for i=1,args.n do
+		local arg = args[i]
+		if type(arg) == 'boolean' then
+			args[i] = arg and 'yes' or 'no'
+		else
+			local id = dbg:id(arg)
+			if id then args[i] = id end
+		end
+	end
+	return _(fmt, glue.unpack(args))
 end
 
 function dbg:install_to_client(client)
@@ -158,26 +173,13 @@ function dbg:install_to_client(client)
 
 	local dbg = self
 	function client:dbg(target, event, fmt, ...)
-		local args
-		if fmt then
-			args = glue.pack(...)
-			for i=1,args.n do
-				local arg = args[i]
-				if type(arg) == 'boolean' then
-					args[i] = arg and 'yes' or 'no'
-				else
-					local id = dbg:id(arg)
-					if id then args[i] = id end
-				end
-			end
-		end
-		local s = fmt and _(fmt, glue.unpack(args)) or ''
 		local t1, dt = dbg:clock'request'
 		print(_('%6.2fs %5.2fs %-4s %-4s %-20s %s',
 			t1, dt,
+			dbg:id(currentthread()),
 			dbg:id(target),
-			dbg:id(loop.current()),
-			event, s))
+			event,
+			dbg:format(fmt, ...)))
 	end
 
 	local function pass(rc, ...)
@@ -189,6 +191,26 @@ function dbg:install_to_client(client)
 		local rc = t.redirect_count or 0
 		print(('>'):rep(1+rc)..('-'):rep(78-rc))
 		return pass(rc, inherited(self, t, ...))
+	end)
+
+end
+
+function dbg:install_to_server(server)
+	if not server.debug then return end
+
+	local dbg = self
+	function server:dbg(event, tcp, fmt, ...)
+		local t1, dt = dbg:clock'request'
+		print(_('%6.2fs %5.2fs %-4s %-4s %-20s %s',
+			t1, dt,
+			dbg:id(currentthread()),
+			dbg:id(tcp),
+			event,
+			dbg:format(fmt, ...)))
+	end
+
+	glue.override(server, 'read_request', function(inherited, self, ...)
+		return inherited(self, ...)
 	end)
 
 end

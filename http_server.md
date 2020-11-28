@@ -15,6 +15,19 @@ GZip compression can be enabled with `client.http.zlib = require'zlib'`.
 
 <warn>WIP<warn>
 
+## Configuration
+
+~~~{.lua}
+local s2    = require'socket2'
+local s2tls = require'socket2_libtls'
+local zlib  = require'zlib'
+
+server.tcp           = s2.tcp               --required, for I/O
+server.stcp          = s2tls.server_stcp    --optional, for TLS
+server.newthread     = s2.newthread         --required, for scheduling
+server.http.zlib     = zlib
+~~~
+
 ## API
 
 --------------------------------- --------------------------------------------

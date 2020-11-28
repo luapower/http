@@ -15,28 +15,6 @@ M.newthread = socket.newthread
 M.start     = socket.start
 M.sleep     = socket.sleep
 
---http<->socket2 binding -----------------------------------------------------
-
-function M.http_bind_socket(http, sock)
-
-	function http:getsocket() return sock end
-	function http:setsocket(newsock) sock = newsock end
-
-	function http:io_recv(buf, sz)
-		return sock:recv(buf, sz, self.read_expires)
-	end
-
-	function http:io_send(buf, sz)
-		return sock:send(buf, sz, self.send_expires)
-	end
-
-	function http:close()
-		sock:close()
-		self.closed = true
-	end
-
-end
-
 --http<->libtls binding ------------------------------------------------------
 
 local function load_file(self, kf, ks)
@@ -45,7 +23,7 @@ local function load_file(self, kf, ks)
 	t[ks] = assert(glue.readfile(t[kf]))
 end
 
-function M.http_bind_tls(self, http, tcp, vhost, mode)
+function M.stcp(tcp, opt)
 
 	local stcp = require'socket2_libtls'
 
@@ -53,6 +31,7 @@ function M.http_bind_tls(self, http, tcp, vhost, mode)
 	if mode == 'client' then
 		load_file(self, 'tls_ca_file', 'tls_ca')
 	end
+
 	local stcp, err = stcp.new(tcp, {
 		mode = mode,
 		ca = self.tls_ca,
@@ -60,11 +39,10 @@ function M.http_bind_tls(self, http, tcp, vhost, mode)
 		insecure_noverifycert = self.tls_insecure_noverifycert,
 	})
 	if not stcp then
-		http:close()
 		return nil, err
 	end
-	http:setsocket(stcp)
-	return true
+
+	return stcp
 end
 
 
