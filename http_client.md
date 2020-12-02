@@ -15,17 +15,17 @@ In short, your dream library for web scraping.
 ## Configuration
 
 ~~~{.lua}
-local s2    = require'socket2'
-local s2tls = require'socket2_libtls'
-local zlib  = require'zlib'
+local sock    = require'sock'
+local socktls = require'sock_libtls'
+local zlib    = require'zlib'
 
-client.tcp           = s2.tcp             --required, for I/O
-client.stcp          = s2tls.client_stcp  --optional, for TLS
-client.stcp_config   = s2tls.config       --optional, for TLS
-client.suspend       = s2.suspend         --required, for scheduling
-client.resume        = s2.resume          --required, for scheduling
-client.currentthread = s2.thread          --required, for scheduling
-client.http.zlib     = zlib               --optional, for compression
+client.tcp           = sock.tcp             --required, for I/O
+client.stcp          = socktls.client_stcp  --optional, for TLS
+client.stcp_config   = socktls.config       --optional, for TLS
+client.suspend       = sock.suspend         --required, for scheduling
+client.resume        = sock.resume          --required, for scheduling
+client.currentthread = sock.thread          --required, for scheduling
+client.http.zlib     = zlib                 --optional, for compression
 ~~~
 
 ## API

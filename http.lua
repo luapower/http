@@ -6,6 +6,7 @@ if not ... then require'http_server_test'; return end
 
 local time = require'time'
 local glue = require'glue'
+local errors = require'errors'
 local stream = require'stream'
 local http_headers = require'http_headers'
 local ffi = require'ffi'
@@ -15,53 +16,27 @@ local http = {type = 'http_connection', dbg = glue.noop}
 
 --error handling -------------------------------------------------------------
 
---raise protocol errors with check() instead of assert() or error() which
---makes functions wrapped with http:protect() return nil,err for those errors.
+--errors raised with with :check() instead of assert() or error() enable
+--methods wrapped with http:protect() to return nil,err for those errors
+--and also to close the connection automatically on the first error.
 
 --we distinguish between invalid usage (bugs on this side, which raise),
 --protocol errors (bugs on the other side which don't raise) and I/O errors
 --(network failures which can be temporary, making the call retriable).
 
-local error_class = {
-	protocol = {id = 'protocol_error'},
-	io = {id = 'io_error'},
-}
+local http_error = errors.errortype'http'
+local sock_error = errors.errortype'socket'
 
-local function checker(error_class, v, err)
-	return function(v, err)
-		if v then return v end
-		error(setmetatable({
-				message = err,
-				traceback = debug.traceback(err and '\n'..err or ''),
-			}, error_class))
-	end
-end
-local check = checker(error_class.protocol)
-local check_io = checker(error_class.io)
+local checkerror = errors.check
 
-local function catch(err)
-	if type(err) == 'string' then
-		return debug.traceback('\n'..err)
-	else
-		return err
-	end
-end
-local function pass(self, ok, ...)
-	if ok then return ... end
-	self.tcp:close()
-	local err = ...
-	local error_class = getmetatable(err)
-	if error_class and error_class.id then
-		return nil, err.message or err.traceback or error_class.id, error_class.id --, err.traceback
-	else
-		error(err, 2)
-	end
-end
+function http:check   (v, ...) return checkerror('http'  , v, {http = self}, ...) end
+function http:check_io(v, ...) return checkerror('socket', v, {http = self}, ...) end
+
+glue.before(http_error, 'init', function(self) self.http.tcp:close(0) end)
+glue.before(sock_error, 'init', function(self) self.http.tcp:close(0) end)
+
 function http:protect(method)
-	local f = self[method]
-	self[method] = function(self, ...)
-		return pass(self, xpcall(f, catch, self, ...))
-	end
+	self[method] = errors.protect('http socket', self[method])
 end
 
 --low-level I/O API ----------------------------------------------------------
@@ -69,8 +44,12 @@ end
 function http:send(buf, sz)
 	local left = sz or #buf
 	while left > 0 do
-		left = left - check_io(self.tcp:send(buf, sz, self.send_expires))
+		left = left - self:check_io(self.tcp:send(buf, sz, self.send_expires))
 	end
+end
+
+function http:close(expires)
+	self:check_io(self.tcp:close(expires))
 end
 
 --linebuffer-based read API --------------------------------------------------
@@ -80,14 +59,14 @@ function http:read_exactly(n, write)
 	local n0 = n
 	while n > 0 do
 		local buf, sz = read(n)
-		check_io(buf, sz)
+		self:check_io(buf, sz)
 		write(buf, sz)
 		n = n - sz
 	end
 end
 
 function http:read_line()
-	return check_io(self.linebuffer.readline())
+	return self:check_io(self.linebuffer.readline())
 end
 
 function http:read_until_closed(write_content)
@@ -96,7 +75,7 @@ function http:read_until_closed(write_content)
 		local buf, sz = read(1/0)
 		if not buf then
 			if sz == 'closed' then return end
-			check_io(nil, sz)
+			self:check_io(nil, sz)
 		end
 		write_content(buf, sz)
 	end
@@ -113,73 +92,26 @@ end
 
 --request line & status line -------------------------------------------------
 
---https://www.iana.org/assignments/http-status-codes/http-status-codes.txt
+--only useful (i.e. that browsers act on) status codes are listed here.
 http.status_messages = {
-	[100] = 'Continue',
-	[101] = 'Switching Protocols',
-	[102] = 'Processing',
-	[103] = 'Early Hints',
 	[200] = 'OK',
-	[201] = 'Created',
-	[202] = 'Accepted',
-	[203] = 'Non-Authoritative Information',
-	[204] = 'No Content',
-	[205] = 'Reset Content',
-	[206] = 'Partial Content',
-	[207] = 'Multi-Status',
-	[208] = 'Already Reported',
-	[226] = 'IM Used',
-	[300] = 'Multiple Choices',
-	[301] = 'Moved Permanently',
-	[302] = 'Found',
-	[303] = 'See Other',
-	[304] = 'Not Modified',
-	[305] = 'Use Proxy',
-	[306] = '(Unused)',
-	[307] = 'Temporary Redirect',
-	[308] = 'Permanent Redirect',
-	[400] = 'Bad Request',
-	[401] = 'Unauthorized',
-	[402] = 'Payment Required',
-	[403] = 'Forbidden',
-	[404] = 'Not Found',
-	[405] = 'Method Not Allowed',
-	[406] = 'Not Acceptable',
-	[407] = 'Proxy Authentication Required',
-	[408] = 'Request Timeout',
-	[409] = 'Conflict',
-	[410] = 'Gone',
-	[411] = 'Length Required',
-	[412] = 'Precondition Failed',
-	[413] = 'Payload Too Large',
-	[414] = 'URI Too Long',
-	[415] = 'Unsupported Media Type',
-	[416] = 'Range Not Satisfiable',
-	[417] = 'Expectation Failed',
-	[421] = 'Misdirected Request',
-	[422] = 'Unprocessable Entity',
-	[423] = 'Locked',
-	[424] = 'Failed Dependency',
-	[425] = 'Too Early',
-	[426] = 'Upgrade Required',
-	[427] = 'Unassigned',
-	[428] = 'Precondition Required',
-	[429] = 'Too Many Requests',
-	[430] = 'Unassigned',
-	[431] = 'Request Header Fields Too Large',
-	[451] = 'Unavailable For Legal Reasons',
-	[500] = 'Internal Server Error',
-	[501] = 'Not Implemented',
-	[502] = 'Bad Gateway',
-	[503] = 'Service Unavailable',
-	[504] = 'Gateway Timeout',
-	[505] = 'HTTP Version Not Supported',
-	[506] = 'Variant Also Negotiates',
-	[507] = 'Insufficient Storage',
-	[508] = 'Loop Detected',
-	[509] = 'Unassigned',
-	[510] = 'Not Extended',
-	[511] = 'Network Authentication Required',
+	[500] = 'Internal Server Error', --crash handler.
+	[406] = 'Not Acceptable',        --basically 400, based on `accept-encoding`.
+	[405] = 'Method Not Allowed',    --basically 400, based on `allowed_methods`.
+	[404] = 'Not Found',             --not found and not ok to redirect to home page.
+	[403] = 'Forbidden',             --needs login and not ok to redirect to login page.
+	[400] = 'Bad Request',           --client bug (misuse of protocol or API).
+	[401] = 'Unauthorized',          --only for Authorization / WWW-Authenticate.
+	[301] = 'Moved Permanently',     --link changed (link rot protection / upgrade path).
+	[303] = 'See Other',             --redirect away from a POST.
+	[307] = 'Temporary Redirect',    --retry request with same method this time.
+	[308] = 'Permanent Redirect',    --retry request with same method from now on.
+	[429] = 'Too Many Requests',     --for throttling.
+	[304] = 'Not Modified',          --use for If-None-Match or If-Modified-Since.
+	[412] = 'Precondition Failed',   --use for If-Unmodified-Since or If-None-Match.
+	[503] = 'Service Unavailable',   --use when server is down and avoid google indexing.
+	[416] = 'Range Not Satisfiable', --for dynamic downloadable content.
+	[451] = 'Unavailable For Legal Reasons', --to punish EU users for GDPR.
 }
 
 function http:send_request_line(method, uri, http_version)
@@ -195,7 +127,7 @@ function http:read_request_line()
 	local method, uri, http_version =
 		self:read_line():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
 	self:dbg('<-', '%s %s HTTP/%s', method, uri, http_version)
-	check(method, 'invalid request line')
+	self:check(method and (http_version == '1.0' or http_version == '1.1'), 'invalid request line')
 	return http_version, method, uri
 end
 
@@ -216,7 +148,7 @@ function http:read_status_line()
 		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
 	self:dbg('<=', '%s %s %s', status, status_message, http_version)
 	status = tonumber(status)
-	check(http_version and status, 'invalid status line')
+	self:check(http_version and status, 'invalid status line')
 	return http_version, status, status_message
 end
 
@@ -264,7 +196,7 @@ function http:read_headers(rawheaders)
 	line = self:read_line()
 	while line ~= '' do --headers end up with a blank line
 		name, value = line:match'^([^:]+):%s*(.*)'
-		check(name, 'invalid header')
+		self:check(name, 'invalid header')
 		name = name:lower() --header names are case-insensitive
 		line = self:read_line()
 		while line:find'^%s' do --unfold any folded values
@@ -314,7 +246,7 @@ function http:read_chunks(write_content)
 		chunk_num = chunk_num + 1
 		local line = self:read_line()
 		local len = tonumber(string.gsub(line, ';.*', ''), 16) --len[; extension]
-		check(len, 'invalid chunk size')
+		self:check(len, 'invalid chunk size')
 		total = total + len
 		self:dbg('<<', '%7d bytes; chunk %d', len, chunk_num)
 		if len == 0 then --last chunk (trailers not supported)
@@ -593,7 +525,7 @@ function http:read_response(req)
 	local receive_content = req.receive_content
 	if self:should_redirect(req, res) then
 		receive_content = nil --ignore the body
-		res.redirect_location = check(res.headers['location'], 'no location')
+		res.redirect_location = self:check(res.headers['location'], 'no location')
 		res.receive_content = req.receive_content
 	end
 
@@ -602,7 +534,7 @@ function http:read_response(req)
 			self:read_body(res.headers, receive_content, true, res.close)
 	end
 	if res.close then
-		self.tcp:close()
+		self:close(self.read_expires)
 	end
 
 	return res
@@ -761,9 +693,9 @@ function http:send_response(res)
 			if n == nil and err == 'closed' then
 				break
 			end
-			check_io(n, err)
+			self:check_io(n, err)
 		end
-		self.tcp:close()
+		self:close(self.send_expires)
 	end
 	return true
 end

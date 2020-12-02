@@ -2,19 +2,19 @@
 local ffi = require'ffi'
 ffi.tls_libname = 'tls_libressl'
 
-local client = require'http_client'
-local s2     = require'socket2'
-local s2tls  = require'socket2_libtls'
-local zlib   = require'zlib'
-local time   = require'time'
+local client  = require'http_client'
+local sock    = require'sock'
+local socktls = require'sock_libtls'
+local zlib    = require'zlib'
+local time    = require'time'
 
-client.tcp           = s2.tcp
-client.stcp          = s2tls.client_stcp
-client.stcp_config   = s2tls.config
-client.cosafewrap    = s2.cosafewrap
-client.suspend       = s2.suspend
-client.resume        = s2.resume
-client.currentthread = s2.thread
+client.tcp           = sock.tcp
+client.stcp          = socktls.client_stcp
+client.stcp_config   = socktls.config
+client.cosafewrap    = sock.cosafewrap
+client.suspend       = sock.suspend
+client.resume        = sock.resume
+client.currentthread = sock.thread
 client.http.zlib     = zlib
 
 local function search_page_url(pn)
@@ -38,9 +38,9 @@ local client = client:new{
 }
 local n = 0
 for i=1,1 do
-	s2.newthread(function()
+	sock.newthread(function()
 		print('sleep .5')
-		s2.sleep(.5)
+		sock.sleep(.5)
 		local res, req, err_class = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			host = 'luapower.com', uri = '/',
@@ -59,13 +59,13 @@ for i=1,1 do
 			n = n + (res and res.content and #res.content or 0)
 		else
 			print('sleep .5')
-			s2.sleep(.5)
+			sock.sleep(.5)
 			print('ERROR:', req)
 		end
 	end)
 end
 local t0 = time.clock()
-s2.start()
+sock.start()
 t1 = time.clock()
 print(mbytes(n / (t1 - t0))..'/s')
 

@@ -7,7 +7,7 @@ Works over an user-provided I/O API with three methods:
 
  * `http.tcp:recv(buf, maxlen, [expires]) -> recv_len | nil,'closed' | nil,err`
  * `http.tcp:send(s|buf, [len], [expires]) -> sent_len | nil,err`
- * `http.tcp:close()`
+ * `http.tcp:close([expires])`
 
 GZip compression can be enabled with `http.zlib = require'zlib'`.
 

@@ -4,15 +4,15 @@ ffi.tls_libname = 'tls_libressl'
 
 --USE_LUASOCKET = true
 
-local s2     = require'socket2'
-local s2tls = require'socket2_libtls'
-local server = require'http_server'
-local zlib   = require'zlib'
+local sock    = require'sock'
+local socktls = require'sock_libtls'
+local server  = require'http_server'
+local zlib    = require'zlib'
 
-server.tcp        = s2.tcp
-server.newthread  = s2.newthread
-server.cosafewrap = s2.cosafewrap
-server.stcp       = s2tls.server_stcp
+server.tcp        = sock.tcp
+server.newthread  = sock.newthread
+server.cosafewrap = sock.cosafewrap
+server.stcp       = socktls.server_stcp
 server.http.zlib  = zlib
 
 local libtls = require'libtls'
@@ -55,4 +55,4 @@ local server = server:new{
 	end
 }
 
-s2.start()
+sock.start()

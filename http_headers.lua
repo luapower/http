@@ -72,7 +72,10 @@ local function namelist(s) --"a,b" -> {'a','b'}
 	return t
 end
 
---tokenized compound value parsers
+--tokenized compound value parsers.
+
+--Did you know that somebody actually got a medal for designing this protocol?
+--Because I know just where they should put it and it's not a nice place.
 
 local value_re = re.compile([[
 	value         <- (quoted_string / comment / separator / token)* -> {}
