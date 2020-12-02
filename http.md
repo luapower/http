@@ -73,9 +73,8 @@ The `opt` table can contain:
 `close`                           close the connection (and tell client to)
 `content`, `content_size`         body: string, read function or cdata buffer
 `compress`                        `false`: don't compress body
-`allowed_methods`                 allowed methods: `{method->true}`
-`content_type`                    preferred content type
-`content_types`                   available content types: `{content_type1,...}`
+`allowed_methods`                 allowed methods: `{method->true}` (optional)
+`content_type`                    content type (optional)
 --------------------------------- --------------------------------------------
 
 #### `http:send_response(res) -> true | nil,err,errtype`

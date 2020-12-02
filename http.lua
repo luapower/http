@@ -48,7 +48,7 @@ local function catch(err)
 end
 local function pass(self, ok, ...)
 	if ok then return ... end
-	self:close()
+	self.tcp:close()
 	local err = ...
 	local error_class = getmetatable(err)
 	if error_class and error_class.id then
@@ -71,12 +71,6 @@ function http:send(buf, sz)
 	while left > 0 do
 		left = left - check_io(self.tcp:send(buf, sz, self.send_expires))
 	end
-end
-
-function http:close()
-	if self.closed then return end
-	self.tcp:close()
-	self.closed = true
 end
 
 --linebuffer-based read API --------------------------------------------------
@@ -347,7 +341,7 @@ function http:send_chunked(read_content)
 			self:send(chunk, len)
 			self:send'\r\n'
 		else
-			seld:dbg('>>', '%7d bytes; chunk %d', 0, chunk_num)
+			self:dbg('>>', '%7d bytes; chunk %d', 0, chunk_num)
 			self:send'0\r\n\r\n'
 			break
 		end
@@ -357,8 +351,8 @@ end
 
 function http:zlib_decoder(format, write)
 	assert(self.zlib, 'zlib not loaded')
-	local decode = coroutine.wrap(function()
-		self.zlib.inflate(coroutine.yield, write, nil, format)
+	local decode = self.cosafewrap(function(yield)
+		self.zlib.inflate(yield, write, nil, format)
 	end)
 	decode()
 	return decode
@@ -388,9 +382,9 @@ function http:zlib_encoder(format, content, content_size)
 		--TODO: avoid string creation
 		return self.zlib.deflate(ffi.string(content, content_size), '', nil, format)
 	else
-		return coroutine.wrap(function()
+		return self.cosafewrap(function(yield)
 			--TODO: avoid string creation
-			self.zlib.deflate(content, coroutine.yield, nil, format)
+			self.zlib.deflate(content, yield, nil, format)
 		end)
 	end
 end
@@ -411,7 +405,7 @@ function http:send_body(content, content_size, transfer_encoding)
 				if not chunk then break end
 				local len = len or #chunk
 				total = total + len
-				seld:dbg('>>', '%7d bytes total', len)
+				self:dbg('>>', '%7d bytes total', len)
 				self:send(chunk, len)
 			end
 			self:dbg('>>', '%7d bytes total', total)
@@ -424,11 +418,9 @@ function http:send_body(content, content_size, transfer_encoding)
 	self:dbg('  ', '')
 end
 
-local function null_write() end
-
-function http:read_body_to_writer(headers, write, from_server, close_connection)
+function http:read_body_to_writer(headers, write, from_server, close)
 	write = write and self:chained_decoder(write, headers['content-encoding'])
-		or null_write
+		or glue.noop
 	local te = headers['transfer-encoding']
 	if te and te[#te] == 'chunked' then
 		self:read_chunks(write)
@@ -436,25 +428,32 @@ function http:read_body_to_writer(headers, write, from_server, close_connection)
 		local len = headers['content-length']
 		self:dbg('<<', '%7d bytes total', len)
 		self:read_exactly(len, write)
-	elseif from_server and close_connection then
+	elseif from_server and close then
 		self:dbg('<<', '?? bytes (reading until closed)')
 		self:read_until_closed(write)
 	end
 end
 
-function http:read_body(headers, write, ...)
+function http:read_body(headers, write, from_server, close)
 	if write == 'string' or write == 'buffer' then
 		local to_string = write == 'string'
 		local write, get = stream.dynarray_writer()
-		self:read_body_to_writer(headers, write, ...)
+		self:read_body_to_writer(headers, write, from_server, close)
 		local buf, sz = get()
 		if to_string then
 			return ffi.string(buf, sz)
 		else
 			return buf, sz
 		end
+	elseif write == 'reader' then
+		--don't read the body, but return a reader function for it instead.
+		return self.cosafewrap(function(yield)
+			self:read_body_to_writer(headers, yield, from_server, close)
+			return nil, 'eof'
+		end)
 	else
-		self:read_body_to_writer(headers, write, ...)
+		self:read_body_to_writer(headers, write, from_server, close)
+		return true
 	end
 end
 
@@ -513,9 +512,9 @@ end
 http:protect'send_request'
 
 function http:should_have_response_body(method, status)
-	if method == 'HEAD' then return nil end
-	if status == 204 or status == 304 then return nil end
-	if status >= 100 and status < 200 then return nil end
+	if method == 'HEAD' then return false end
+	if status == 204 or status == 304 then return false end
+	if status >= 100 and status < 200 then return false end
 	return true
 end
 
@@ -587,8 +586,8 @@ function http:read_response(req)
 	self:read_headers(res.rawheaders)
 	res.headers = self:parsed_headers(res.rawheaders)
 
-	res.close =
-		(res.headers['connection'] and res.headers['connection'].close)
+	res.close = req.close
+		or (res.headers['connection'] and res.headers['connection'].close)
 		or res.http_version == '1.0'
 
 	local receive_content = req.receive_content
@@ -598,15 +597,12 @@ function http:read_response(req)
 		res.receive_content = req.receive_content
 	end
 
-	if not self:should_have_response_body(req.method, res.status) then
-		receive_content = nil --ignore the body
+	if self:should_have_response_body(req.method, res.status) then
+		res.content, res.content_size =
+			self:read_body(res.headers, receive_content, true, res.close)
 	end
-
-	res.content, res.content_size =
-		self:read_body(res.headers, receive_content, true, res.close)
-
-	if req.close or res.close then
-		self:close()
+	if res.close then
+		self.tcp:close()
 	end
 
 	return res
@@ -615,17 +611,25 @@ http:protect'read_response'
 
 --server side ----------------------------------------------------------------
 
-function http:read_request(receive_content)
+function http:read_request()
 	local req = {}
 	req.http_version, req.method, req.uri = self:read_request_line()
 	req.rawheaders = {}
 	self:read_headers(req.rawheaders)
 	req.headers = self:parsed_headers(req.rawheaders)
 	req.close = req.headers['connection'] and req.headers['connection'].close
-	req.content, req.content_size = self:read_body(req.headers, receive_content)
+	local http = self
+	function req:read_body(write)
+		return http:read_request_body(self, write)
+	end
 	return req
 end
 http:protect'read_request'
+
+function http:read_request_body(req, write)
+	return self:read_body(req.headers, write)
+end
+http:protect'read_request_body'
 
 local function content_size(opt)
 	return type(opt.content) == 'string' and #opt.content
@@ -641,14 +645,35 @@ local function q0(t)
 	return type(t) == 'table' and t.q == 0
 end
 
+http.nocompress_mime_types = glue.index{
+	'image/gif',
+	'image/jpeg',
+	'image/png',
+	'image/x-icon',
+	'font/woff',
+	'font/woff2',
+	'application/pdf',
+	'application/zip',
+	'application/x-gzip',
+	'application/x-gzip',
+	'application/x-xz',
+	'application/x-bz2',
+	'audio/mpeg',
+}
+
 function http:accept_content_encoding(req, opt)
-	local compress = opt.compress ~= false and self.zlib
-		and (content_size(opt) or 0) >= 1000
 	local accept = req.headers['accept-encoding']
-	if accept then
-		if compress and not q0(accept.gzip) then return true, 'gzip' end
-		if compress and not q0(accept.deflate) then return true, 'deflate' end
+	if not accept then
+		return true
 	end
+	local compress = opt.compress ~= false and self.zlib
+		and (content_size(opt) or 1/0) >= 1000
+		and (not opt.content_type or not self.nocompress_mime_types[opt.content_type])
+	if not compress then
+		return true
+	end
+	if not q0(accept.gzip   ) then return true, 'gzip'    end
+	if not q0(accept.deflate) then return true, 'deflate' end
 	return true
 end
 
@@ -728,7 +753,17 @@ function http:send_response(res)
 	self:send_headers(res.headers)
 	self:send_body(res.content, res.content_size, res.headers['transfer-encoding'])
 	if res.close then
-		self:close()
+		self:shutdown'w'
+		--wait for client to close the connection before closing our end
+		--to avoid cutting the stream before the client receives all the data.
+		while true do
+			local n,err = self.tcp:recv()
+			if n == nil and err == 'closed' then
+				break
+			end
+			check_io(n, err)
+		end
+		self.tcp:close()
 	end
 	return true
 end

@@ -1,5 +1,6 @@
 #!/bin/bash
-# generate a test CA to put in the browser and server certificates signed by it.
+# generates a test CA to be put in the browser.
+# generates a server certificates signed by the CA to configure http servers with.
 
 usage() { echo "USAGE: mgit cert $1"; exit; }
 

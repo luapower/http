@@ -129,22 +129,25 @@ function dbg:install_to_http(http)
 		end
 
 		glue.override(http.tcp, 'recv', function(inherited, self, buf, ...)
-			local sz, err = inherited(self, buf, ...)
-			if not sz then return nil, err end
+			local sz, err, errcode = inherited(self, buf, ...)
+			if not sz then return nil, err, errcode end
 			P(' <', ffi.string(buf, sz))
 			return sz
 		end)
 
 		glue.override(http.tcp, 'send', function(inherited, self, buf, ...)
-			local sz, err = inherited(self, buf, ...)
-			if not sz then return nil, err end
+			local sz, err, errcode = inherited(self, buf, ...)
+			if not sz then return nil, err, errcode end
 			P(' >', ffi.string(buf, sz))
 			return sz
 		end)
 
-		glue.after(http.tcp, 'close', function(self)
+		glue.override(http.tcp, 'close', function(inherited, self, ...)
+			local ok, err, errcode = inherited(self, ...)
+			if not ok then return nil, err, errcode  end
 			P('CC')
 			dbg:reset_clock'stream'
+			return ok
 		end)
 
 	end

@@ -8,7 +8,6 @@ local glue = require'glue'
 local b64 = require'libb64'
 local http_date = require'http_date'
 local re = require'lpeg.re' --for tokens()
-local uri = require'uri'
 local base64 = b64.decode_string
 local _ = string.format
 local concat = table.concat
@@ -48,8 +47,6 @@ end
 local function date(s)
 	return http_date.parse(s)
 end
-
-local url = glue.pass --urls are not parsed (replace with uri.parse if you want them parsed)
 
 local function namesplit(s)
 	local name = s:gmatch'[^,]+'
@@ -240,7 +237,7 @@ local function must_urllist(s)
 	if s == true then return end
 	local dt = {}
 	for s in glue.gsplit(s, ' ') do
-		dt[#dt+1] = url(s)
+		dt[#dt+1] = s
 	end
 	return #dt > 0 and dt or nil
 end

@@ -30,6 +30,7 @@ local client = {
 	max_cookies_per_host = 1000,
 	tls_options = {
 		ca_file = 'cacert.pem',
+		loadfile = glue.readfile,
 	},
 }
 
@@ -73,6 +74,7 @@ function client:target(t) --t is request options
 			https = https,
 			max_line_size = t.max_line_size,
 			debug = t.debug,
+			cosafewrap = self.cosafewrap,
 		}
 		target.max_pipelined_requests = t.max_pipelined_requests
 		target.max_conn = t.max_conn_per_target
@@ -152,14 +154,7 @@ end
 
 function client:stcp_options(host, port)
 	if not self._tls_config then
-		local opt = glue.update({}, self.tls_options)
-		for k,v in pairs(opt) do
-			if glue.ends(k, '_file') then
-				opt[k:gsub('_file$', '')] = assert(self.loadfile(v))
-				opt[k] = nil
-			end
-		end
-		self._tls_config = self.stcp_config(opt)
+		self._tls_config = self.stcp_config(self.tls_options)
 	end
 	return self._tls_config
 end

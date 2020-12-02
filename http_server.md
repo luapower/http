@@ -22,10 +22,11 @@ local s2    = require'socket2'
 local s2tls = require'socket2_libtls'
 local zlib  = require'zlib'
 
-server.tcp           = s2.tcp               --required, for I/O
-server.stcp          = s2tls.server_stcp    --optional, for TLS
-server.newthread     = s2.newthread         --required, for scheduling
-server.http.zlib     = zlib
+server.tcp           = s2.tcp             --required, for I/O
+server.stcp          = s2tls.server_stcp  --optional, for TLS
+client.stcp_config   = s2tls.config       --optional, for TLS
+server.newthread     = s2.newthread       --required, for scheduling
+server.http.zlib     = zlib               --optional, for compression
 ~~~
 
 ## API
@@ -34,3 +35,9 @@ server.http.zlib     = zlib
 `server:new(opt) -> server`       create a server object
 --------------------------------- --------------------------------------------
 
+#### Server options
+
+--------------------------------- --------------------------------------------
+`listen`                          `{host=, port=, tls=t|f, tls_options=}`
+`tls_options`                     options for [libtls]
+--------------------------------- --------------------------------------------

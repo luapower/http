@@ -48,8 +48,7 @@ Create a client object. The `opt` table can contain:
 `max_retries`                     number of retries before giving up
 `max_redirects`                   number of redirects before giving up
 `debug`                           `true` to enable client-level debugging
-`tls_ca_file`                     CA file (defaults to `cacert.pem`)
-`tls_insecure_noverify_cert`      disable server certificate validation
+`tls_options`                     options for [libtls]
 --------------------------------- --------------------------------------------
 
 Note: A _target_ is a combination of (vhost, port, client_ip) on which

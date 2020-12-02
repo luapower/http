@@ -11,6 +11,7 @@ local time   = require'time'
 client.tcp           = s2.tcp
 client.stcp          = s2tls.client_stcp
 client.stcp_config   = s2tls.config
+client.cosafewrap    = s2.cosafewrap
 client.suspend       = s2.suspend
 client.resume        = s2.resume
 client.currentthread = s2.thread
@@ -31,7 +32,6 @@ function mbytes(n)
 end
 
 local client = client:new{
-	loop = loop,
 	max_conn = 5,
 	max_pipelined_requests = 10,
 	debug = {protocol = true},
