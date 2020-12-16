@@ -27,10 +27,19 @@ local http = {type = 'http_connection', dbg = glue.noop}
 local http_error = errors.errortype'http'
 local sock_error = errors.errortype'socket'
 
-local checkerror = errors.check
+function http:check(v, ...)
+	if v then return v, ... end
+	local err, errcode = ...
+	errors.raise(http_error{http = self, message = err, errorcode = errcode,
+		addtraceback = self.debug and self.debug.tracebacks})
+end
 
-function http:check   (v, ...) return checkerror('http'  , v, {http = self}, ...) end
-function http:check_io(v, ...) return checkerror('socket', v, {http = self}, ...) end
+function http:check_io(v, ...)
+	if v then return v, ... end
+	local err, errcode = ...
+	errors.raise(sock_error{http = self, message = err, errorcode = errcode,
+		addtraceback = self.debug and self.debug.tracebacks})
+end
 
 glue.before(http_error, 'init', function(self) self.http.tcp:close(0) end)
 glue.before(sock_error, 'init', function(self) self.http.tcp:close(0) end)
@@ -41,10 +50,12 @@ end
 
 --low-level I/O API ----------------------------------------------------------
 
-function http:send(buf, sz)
-	local left = sz or #buf
-	while left > 0 do
-		left = left - self:check_io(self.tcp:send(buf, sz, self.send_expires))
+function http:create_send_function()
+	local send = stream.repeatwriter(function(buf, sz)
+		return self.tcp:send(buf, sz, self.send_expires)
+	end)
+	function self:send(buf, sz)
+		self:check_io(send(buf, sz))
 	end
 end
 
@@ -321,36 +332,46 @@ function http:zlib_encoder(format, content, content_size)
 	end
 end
 
-function http:send_body(content, content_size, transfer_encoding)
-	if not content then
-		self:dbg('  ', '')
-		return
-	end
-	if transfer_encoding == 'chunked' then
-		self:send_chunked(content)
-	else
-		assert(not transfer_encoding, 'invalid transfer-encoding')
-		if type(content) == 'function' then
-			local total = 0
-			while true do
-				local chunk, len = content()
-				if not chunk then break end
-				local len = len or #chunk
-				total = total + len
-				self:dbg('>>', '%7d bytes total', len)
-				self:send(chunk, len)
-			end
-			self:dbg('>>', '%7d bytes total', total)
+function http:send_body(content, content_size, transfer_encoding, close)
+	if content then
+		if transfer_encoding == 'chunked' then
+			self:send_chunked(content)
 		else
-			local len = content_size or #content
-			self:dbg('>>', '%7d bytes', len)
-			self:send(content, content_size)
+			assert(not transfer_encoding, 'invalid transfer-encoding')
+			if type(content) == 'function' then
+				local total = 0
+				while true do
+					local chunk, len = content()
+					if not chunk then break end
+					local len = len or #chunk
+					total = total + len
+					self:dbg('>>', '%7d bytes total', len)
+					self:send(chunk, len)
+				end
+				self:dbg('>>', '%7d bytes total', total)
+			else
+				local len = content_size or #content
+				self:dbg('>>', '%7d bytes', len)
+				self:send(content, content_size)
+			end
 		end
 	end
 	self:dbg('  ', '')
+	if close then
+		--this is the "http graceful close" you hear about: we send a FIN to
+		--the client then we wait for it to close the connection in response
+		--to our FIN, and only after that we can close our end.
+		--if we'd just call close() that would send a RST to the client which
+		--would cut the client's pending input stream (it's how TCP works).
+		--TODO: limit how much traffic we absorb for this.
+		self.tcp:shutdown('w', self.send_expires)
+		self:read_until_closed(glue.noop)
+		self:close(self.send_expires)
+	end
 end
 
-function http:read_body_to_writer(headers, write, from_server, close)
+function http:read_body_to_writer(headers, write, from_server, close, state)
+	if state then state.body_was_read = false end
 	write = write and self:chained_decoder(write, headers['content-encoding'])
 		or glue.noop
 	local te = headers['transfer-encoding']
@@ -364,13 +385,17 @@ function http:read_body_to_writer(headers, write, from_server, close)
 		self:dbg('<<', '?? bytes (reading until closed)')
 		self:read_until_closed(write)
 	end
+	if close and from_server then
+		self:close(self.read_expires)
+	end
+	if state then state.body_was_read = true end
 end
 
-function http:read_body(headers, write, from_server, close)
+function http:read_body(headers, write, from_server, close, state)
 	if write == 'string' or write == 'buffer' then
 		local to_string = write == 'string'
 		local write, get = stream.dynarray_writer()
-		self:read_body_to_writer(headers, write, from_server, close)
+		self:read_body_to_writer(headers, write, from_server, close, state)
 		local buf, sz = get()
 		if to_string then
 			return ffi.string(buf, sz)
@@ -380,19 +405,21 @@ function http:read_body(headers, write, from_server, close)
 	elseif write == 'reader' then
 		--don't read the body, but return a reader function for it instead.
 		return self.cosafewrap(function(yield)
-			self:read_body_to_writer(headers, yield, from_server, close)
+			self:read_body_to_writer(headers, yield, from_server, close, state)
 			return nil, 'eof'
 		end)
 	else
-		self:read_body_to_writer(headers, write, from_server, close)
+		self:read_body_to_writer(headers, write, from_server, close, state)
 		return true
 	end
 end
 
 --client-side ----------------------------------------------------------------
 
+local creq = {}
+
 function http:make_request(t, cookies)
-	local req = {http = self, type = 'http_request'}
+	local req = glue.object(creq, {http = self, type = 'http_request'})
 
 	req.http_version = t.http_version or '1.1'
 	req.method = t.method or 'GET'
@@ -501,8 +528,10 @@ function http:should_send_cookie(cookie, host, path, https)
 		and self:cookie_path_matches_request_path(cookie, path)
 end
 
+local cres = {}
+
 function http:read_response(req)
-	local res = {}
+	local res = glue.object(cres, {})
 	res.rawheaders = {}
 
 	local dt = req.reply_timeout
@@ -531,10 +560,7 @@ function http:read_response(req)
 
 	if self:should_have_response_body(req.method, res.status) then
 		res.content, res.content_size =
-			self:read_body(res.headers, receive_content, true, res.close)
-	end
-	if res.close then
-		self:close(self.read_expires)
+			self:read_body(res.headers, receive_content, true, res.close, res)
 	end
 
 	return res
@@ -543,23 +569,25 @@ http:protect'read_response'
 
 --server side ----------------------------------------------------------------
 
+local sreq = {} --server-side request object
+
 function http:read_request()
-	local req = {}
+	local req = glue.object(sreq, {http = self})
 	req.http_version, req.method, req.uri = self:read_request_line()
 	req.rawheaders = {}
 	self:read_headers(req.rawheaders)
 	req.headers = self:parsed_headers(req.rawheaders)
 	req.close = req.headers['connection'] and req.headers['connection'].close
-	local http = self
-	function req:read_body(write)
-		return http:read_request_body(self, write)
-	end
 	return req
 end
 http:protect'read_request'
 
+function sreq:read_body(write)
+	return self.http:read_request_body(self, write)
+end
+
 function http:read_request_body(req, write)
-	return self:read_body(req.headers, write)
+	return self:read_body(req.headers, write, false, false, req)
 end
 http:protect'read_request_body'
 
@@ -628,8 +656,10 @@ function http:accept_content_type(req, opt)
 	return true, opt.content_type
 end
 
+local sres = {}
+
 function http:make_response(req, opt, utc_time)
-	local res = {http = self, request = req, type = 'http_response'}
+	local res = glue.object(self.response, {http = self, request = req, type = 'http_response'})
 	res.headers = {}
 
 	res.http_version = opt.http_version or req.http_version
@@ -683,20 +713,7 @@ end
 function http:send_response(res)
 	self:send_status_line(res.status, res.status_message, res.http_version)
 	self:send_headers(res.headers)
-	self:send_body(res.content, res.content_size, res.headers['transfer-encoding'])
-	if res.close then
-		self:shutdown'w'
-		--wait for client to close the connection before closing our end
-		--to avoid cutting the stream before the client receives all the data.
-		while true do
-			local n,err = self.tcp:recv()
-			if n == nil and err == 'closed' then
-				break
-			end
-			self:check_io(n, err)
-		end
-		self:close(self.send_expires)
-	end
+	self:send_body(res.content, res.content_size, res.headers['transfer-encoding'], res.close)
 	return true
 end
 http:protect'send_response'
@@ -710,6 +727,7 @@ function http:new(t)
 		dbg:install_to_http(self)
 	end
 	self:create_linebuffer()
+	self:create_send_function()
 	return self
 end
 

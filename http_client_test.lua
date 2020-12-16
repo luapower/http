@@ -1,6 +1,7 @@
 
 local ffi = require'ffi'
-ffi.tls_libname = 'tls_libressl'
+ffi.tls_libname = 'tls_bearssl'
+--ffi.tls_libname = 'tls_libressl'
 
 local client  = require'http_client'
 local sock    = require'sock'
@@ -14,7 +15,7 @@ client.stcp_config   = socktls.config
 client.cosafewrap    = sock.cosafewrap
 client.suspend       = sock.suspend
 client.resume        = sock.resume
-client.currentthread = sock.thread
+client.currentthread = sock.currentthread
 client.http.zlib     = zlib
 
 local function search_page_url(pn)
@@ -38,7 +39,7 @@ local client = client:new{
 }
 local n = 0
 for i=1,1 do
-	sock.newthread(function()
+	sock.resume(sock.newthread(function()
 		print('sleep .5')
 		sock.sleep(.5)
 		local res, req, err_class = client:request{
@@ -62,7 +63,7 @@ for i=1,1 do
 			sock.sleep(.5)
 			print('ERROR:', req)
 		end
-	end)
+	end))
 end
 local t0 = time.clock()
 sock.start()

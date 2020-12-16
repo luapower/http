@@ -5,18 +5,12 @@ local glue = require'glue'
 local attr = glue.attr
 local _ = string.format
 
---local loop = require'socketloop'
-local currentthread = require'sock'.thread
-
 local dbg = {getaddr = {}, is = {}, prefixes = {}}
 function dbg.is.thread(t)
 	return type(t) == 'thread'
 end
-function dbg.is.luasocket_socket(t) return tostring(t):find'^tcp{%w+}' end
-function dbg.is.luasec_socket(t) return tostring(t):find'^SSL' end
-function dbg.is.socketloop_socket(t) return type(t) == 'table' and t.type == 'socketloop_socket' end
-function dbg.is.sock_tcp_socket(t) return type(t) == 'table' and t.issocket and t:type() == 'tcp' end
-function dbg.is.libtls_sock_tcp_socket(t) return type(t) == 'table' and t.type == 'libtls_sock_tcp_socket' end
+function dbg.is.sock_tcp_socket(t) return type(t) == 'table' and t.istcpsocket and not t.istlssocket end
+function dbg.is.sock_libtls_tcp_socket(t) return type(t) == 'table' and t.istcpsocket and t.istlssocket end
 function dbg.is.http(t) return type(t) == 'table' and t.type == 'http_connection' end
 function dbg.is.target(t) return type(t) == 'table' and t.type == 'http_target' end
 function dbg.is.request(t) return type(t) == 'table' and t.type == 'http_request' end
@@ -42,11 +36,8 @@ function dbg:addr(t)
 end
 dbg.prefixes = {
 	thread = 'T',
-	luasocket_socket = 's',
-	luasec_socket = 'x',
-	socketloop_socket = 'S',
 	sock_tcp_socket = 'S',
-	libtls_sock_tcp_socket = 'X',
+	sock_libtls_tcp_socket = 'X',
 	http = 'H',
 	target = '@',
 	request = 'R',
@@ -98,7 +89,7 @@ function dbg:install_to_http(http)
 
 	local function D(tag, cmd, s)
 		local S = dbg:id(http.tcp) or '-'
-		local T = dbg:id(currentthread()) or 'TM'
+		local T = dbg:id(http.currentthread()) or 'TM'
 		local t1, dt = dbg:clock(tag)
 		print(_('%6.2fs %5.2fs %-4s %-4s %s %s', t1, dt, T, S, cmd, s))
 	end
@@ -179,7 +170,7 @@ function dbg:install_to_client(client)
 		local t1, dt = dbg:clock'request'
 		print(_('%6.2fs %5.2fs %-4s %-4s %-20s %s',
 			t1, dt,
-			dbg:id(currentthread()),
+			dbg:id(self.currentthread()) or 'TM',
 			dbg:id(target),
 			event,
 			dbg:format(fmt, ...)))
@@ -206,7 +197,7 @@ function dbg:install_to_server(server)
 		local t1, dt = dbg:clock'request'
 		print(_('%6.2fs %5.2fs %-4s %-4s %-20s %s',
 			t1, dt,
-			dbg:id(currentthread()),
+			dbg:id(self.currentthread()) or 'TM',
 			dbg:id(tcp),
 			event,
 			dbg:format(fmt, ...)))

@@ -75,6 +75,7 @@ function client:target(t) --t is request options
 			max_line_size = t.max_line_size,
 			debug = t.debug,
 			cosafewrap = self.cosafewrap,
+			currentthread = self.currentthread,
 		}
 		target.max_pipelined_requests = t.max_pipelined_requests
 		target.max_conn = t.max_conn_per_target

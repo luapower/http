@@ -1,9 +1,11 @@
 
-if not ... then require'http_server_test'; return end
+if not ... then require'luapower_server'; return end
 
 local http = require'http'
 local time = require'time'
 local glue = require'glue'
+local errors = require'errors'
+local coro = require'coro'
 
 local _ = string.format
 local attr = glue.attr
@@ -32,8 +34,8 @@ local server = {
 
 server.dbg = glue.noop
 
-function server:utc_time(date)
-	return glue.time(date, true)
+function server:utc_time(ts)
+	return glue.time(ts)
 end
 
 function server:error(fmt, ...)
@@ -49,33 +51,31 @@ function server:new(t)
 		dbg:install_to_server(self)
 	end
 
-	local function handler(ctcp, listen_opt, remote_addr, local_addr)
+	local function handler(ctcp, listen_opt)
 
 		local http = self.http:new({
 			debug = self.debug,
 			max_line_size = self.max_line_size,
 			tcp = ctcp,
 			cosafewrap = self.cosafewrap,
+			currentthread = self.currentthread,
+			listen_options = listen_opt,
 		})
 
 		while not ctcp:closed() do
 
 			local req, err = http:read_request()
 			if not req then
-				if err ~= 'closed' then
+				if not (errors.is(err, 'socket') and err.message == 'closed') then
 					self:error('read_request(): %s', err)
 				end
 				break
 			end
 
-			--TODO: clean up and publish these info fields...
-			req.listen = listen_opt
-			req.remote_addr = remote_addr
-			req.local_addr = local_addr
+			local finished, write_body, sending_response
 
-			local finished, write_body
-
-			function send_response(opt)
+			local function send_response(opt)
+				sending_response = true
 				local res = http:make_response(req, opt, self:utc_time())
 				local ok, err = http:send_response(res)
 				if not ok then
@@ -86,23 +86,51 @@ function server:new(t)
 
 			local function respond_with(opt)
 				if opt.content == nil then
-					write_body = self.cosafewrap(function(yield)
+					local write_body1 = self.cosafewrap(function(yield)
 						opt.content = yield
 						send_response(opt)
 					end)
+					function write_body(...)
+						write_body1(...)
+					end
 					write_body()
 					return write_body
 				else
-					send_response(nil, opt)
+					send_response(opt)
 				end
 			end
 
-			self:respond(req, respond_with)
+			local function raise_with(err)
+				errors.raise('http_response', err)
+			end
+
+			local ok, err = errors.catch(nil, self.respond, self, req, respond_with, raise_with)
+
+			if not ok then
+				if errors.is(err, 'http_response') then
+					assert(not sending_response, 'response already sent')
+					respond_with(err)
+				elseif not sending_response then
+					respond_with{
+						status = 500,
+						content = err,
+					}
+					self:error('respond(): %s', err)
+				else
+					error(('respond(): %s'):format(err))
+				end
+			end
 
 			if not finished and write_body then --eof not signaled.
 				write_body()
 			end
 			assert(finished, 'write_body() not called')
+
+			--the request must be entirely read before we can read the next request.
+			if req.body_was_read == nil then
+				req:read_body()
+			end
+			assert(req.body_was_read, 'request body was not read')
 
 		end
 	end
@@ -121,7 +149,7 @@ function server:new(t)
 
 		local ok, err, errcode = tcp:listen(host, port)
 		if not ok then
-			self:error('listen("%s", %s): %s [%d]', host, port, err, errcode)
+			self:error('listen("%s", %s): %s [%s]', host, port, err, errcode)
 			goto continue
 		end
 		self:dbg('LISTEN', tcp, '%s:%d', host, port)
@@ -139,27 +167,26 @@ function server:new(t)
 		push(self.sockets, tcp)
 
 		function accept_connection()
-			local ctcp, r2, r3 = tcp:accept()
+			local ctcp, err, errcode = tcp:accept()
+			ctcp.n = n
 			if not ctcp then
-				local err, errcode = r2, r3
-				self:error('accept(): %s [d]', err, errcode)
+				self:error('accept(): %s [%s]', err, errcode)
 				return
 			end
-			self.newthread(function()
-				local remote_addr, local_addr = r2, r3
-				local ok, err = xpcall(handler, debug.traceback, ctcp, t, remote_addr, local_addr)
+			self.resume(self.newthread(function()
+				local ok, err = xpcall(handler, debug.traceback, ctcp, t)
 				if not ok then
 					self:error('handler(): %s', err)
 				end
 				ctcp:close()
-			end)
+			end))
 		end
 
-		self.newthread(function()
+		self.resume(self.newthread(function()
 			while not stop do
 				accept_connection()
 			end
-		end)
+		end, 'SRV'))
 
 		::continue::
 	end
