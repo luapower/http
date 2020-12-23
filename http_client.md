@@ -14,20 +14,6 @@ In short, your dream library for web scraping.
 
 ## Configuration
 
-~~~{.lua}
-local sock    = require'sock'
-local socktls = require'sock_libtls'
-local zlib    = require'zlib'
-
-client.tcp           = sock.tcp             --required, for I/O
-client.stcp          = socktls.client_stcp  --optional, for TLS
-client.stcp_config   = socktls.config       --optional, for TLS
-client.suspend       = sock.suspend         --required, for scheduling
-client.resume        = sock.resume          --required, for scheduling
-client.currentthread = sock.thread          --required, for scheduling
-client.http.zlib     = zlib                 --optional, for compression
-~~~
-
 ## API
 
 --------------------------------- --------------------------------------------
@@ -41,6 +27,7 @@ client.http.zlib     = zlib                 --optional, for compression
 Create a client object. The `opt` table can contain:
 
 --------------------------------- --------------------------------------------
+`libs`                            required: `'sock sock_libtls zlib'`
 `max_conn`                        limit the number of total connections
 `max_conn_per_target`             limit the number of connections per _target_
 `max_pipelined_requests`          limit the number of pipelined requests

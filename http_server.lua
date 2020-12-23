@@ -30,11 +30,33 @@ local server = {
 		]],
 		prefer_ciphers_server = true,
 	},
+	dbg = glue.noop,
 }
 
-server.dbg = glue.noop
+function server:bind_libs(libs)
+	for lib in libs:gmatch'[^%s]+' do
+		if lib == 'sock' then
+			local sock = require'sock'
+			self.tcp           = sock.tcp
+			self.cosafewrap    = sock.cosafewrap
+			self.newthread     = sock.newthread
+			self.suspend       = sock.suspend
+			self.resume        = sock.resume
+			self.start         = sock.start
+			self.sleep         = sock.sleep
+			self.currentthread = sock.currentthread
+		elseif lib == 'sock_libtls' then
+			local socktls = require'sock_libtls'
+			self.stcp          = socktls.server_stcp
+		elseif lib == 'zlib' then
+			self.http.zlib = require'zlib'
+		else
+			assert(false)
+		end
+	end
+end
 
-function server:utc_time(ts)
+function server:time(ts)
 	return glue.time(ts)
 end
 
@@ -45,6 +67,10 @@ end
 function server:new(t)
 
 	local self = glue.object(self, {}, t)
+
+	if self.libs then
+		self:bind_libs(self.libs)
+	end
 
 	if self.debug then
 		local dbg = require'http_debug'
@@ -76,7 +102,7 @@ function server:new(t)
 
 			local function send_response(opt)
 				sending_response = true
-				local res = http:make_response(req, opt, self:utc_time())
+				local res = http:make_response(req, opt, self:time())
 				local ok, err = http:send_response(res)
 				if not ok then
 					self:error('send_response(): %s', err)

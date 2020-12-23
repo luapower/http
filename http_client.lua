@@ -32,12 +32,35 @@ local client = {
 		ca_file = 'cacert.pem',
 		loadfile = glue.readfile,
 	},
+	dbg = glue.noop,
 }
 
-client.dbg = glue.noop
+function client:time(ts)
+	return glue.time(ts)
+end
 
-function client:utc_time(date)
-	return glue.time(date, true)
+function client:bind_libs(libs)
+	for lib in libs:gmatch'[^%s]+' do
+		if lib == 'sock' then
+			local sock = require'sock'
+			self.tcp           = sock.tcp
+			self.cosafewrap    = sock.cosafewrap
+			self.newthread     = sock.newthread
+			self.suspend       = sock.suspend
+			self.resume        = sock.resume
+			self.start         = sock.start
+			self.sleep         = sock.sleep
+			self.currentthread = sock.currentthread
+		elseif lib == 'sock_libtls' then
+			local socktls = require'sock_libtls'
+			self.stcp          = socktls.client_stcp
+			self.stcp_config   = socktls.config
+		elseif lib == 'zlib' then
+			self.http.zlib = require'zlib'
+		else
+			assert(false)
+		end
+	end
 end
 
 --targets --------------------------------------------------------------------
@@ -312,27 +335,27 @@ function client:remove_cookie(jar, domain, path, name)
 	--
 end
 
-function client:clear_cookies(client_ip, host, utc_time)
+function client:clear_cookies(client_ip, host, time)
 	--
 end
 
-function client:store_cookies(target, req, res, utc_time)
+function client:store_cookies(target, req, res, time)
 	local cookies = res.headers['set-cookie']
 	if not cookies then return end
-	local utc_time = utc_time or self:utc_time()
+	local time = time or self:time()
 	local client_jar = self:cookie_jar(target.client_ip)
 	local host = target.host
 	for _,cookie in ipairs(cookies) do
 		if self:accept_cookie(cookie, host) then
 			local expires
 			if cookie.expires then
-				expires = self:utc_time(cookie.expires)
+				expires = self:time(cookie.expires)
 			elseif cookie['max-age'] then
-				expires = utc_time + cookie['max-age']
+				expires = time + cookie['max-age']
 			end
 			local domain = cookie.domain or host
 			local path = cookie.path or http:cookie_default_path(req.uri)
-			if expires and expires < utc_time then --expired: remove from jar.
+			if expires and expires < time then --expired: remove from jar.
 				self:remove_cookie(client_jar, domain, path, cookie.name)
 			else
 				local sc = attr(attr(attr(client_jar, domain), path), cookie.name)
@@ -345,11 +368,11 @@ function client:store_cookies(target, req, res, utc_time)
 	end
 end
 
-function client:get_cookies(client_ip, host, uri, https, utc_time)
+function client:get_cookies(client_ip, host, uri, https, time)
 	local client_jar = self:cookie_jar(client_ip)
 	if not client_jar then return end
 	local path = uri:match'^[^%?#]+'
-	local utc_time = utc_time or self:utc_time()
+	local time = time or self:time()
 	local cookies = {}
 	local names = {}
 	for s in host:gmatch'[^%.]+' do
@@ -363,7 +386,7 @@ function client:get_cookies(client_ip, host, uri, https, utc_time)
 			for cpath, path_jar in pairs(domain_jar) do
 				if http:cookie_path_matches_request_path(cpath, path) then
 					for name, sc in pairs(path_jar) do
-						if sc.expires and sc.expires < utc_time then --expired: auto-clean.
+						if sc.expires and sc.expires < time then --expired: auto-clean.
 							self:remove_cookie(client_jar, domain, cpath, sc.name)
 						elseif https or not sc.secure then --allow
 							cookies[name] = sc.value
@@ -485,6 +508,9 @@ function client:new(t)
 	self.last_client_ip_index = glue.tuples(2)
 	self.targets = glue.tuples(3)
 	self.cookies = {}
+	if self.libs then
+		self:bind_libs(self.libs)
+	end
 	if self.debug then
 		local dbg = require'http_debug'
 		dbg:install_to_client(self)

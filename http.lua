@@ -659,7 +659,7 @@ end
 
 local sres = {}
 
-function http:make_response(req, opt, utc_time)
+function http:make_response(req, opt, time)
 	local res = glue.object(self.response, {http = self, request = req, type = 'http_response'})
 	res.headers = {}
 
@@ -703,7 +703,7 @@ function http:make_response(req, opt, utc_time)
 	res.content, res.content_size =
 		self:encode_content(opt.content, opt.content_size, content_encoding)
 
-	res.headers['date'] = utc_time
+	res.headers['date'] = time
 
 	self:set_body_headers(res.headers, res.content, res.content_size, res.close)
 	glue.update(res.headers, opt.headers)

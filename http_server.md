@@ -15,20 +15,6 @@ GZip compression can be enabled with `client.http.zlib = require'zlib'`.
 
 <warn>WIP<warn>
 
-## Configuration
-
-~~~{.lua}
-local sock    = require'sock'
-local socktls = require'sock_libtls'
-local zlib    = require'zlib'
-
-server.tcp           = sock.tcp             --required, for I/O
-server.stcp          = socktls.server_stcp  --optional, for TLS
-client.stcp_config   = socktls.config       --optional, for TLS
-server.newthread     = sock.newthread       --required, for scheduling
-server.http.zlib     = zlib                 --optional, for compression
-~~~
-
 ## API
 
 --------------------------------- --------------------------------------------
@@ -38,6 +24,7 @@ server.http.zlib     = zlib                 --optional, for compression
 #### Server options
 
 --------------------------------- --------------------------------------------
+`libs`                            required: `'sock sock_libtls zlib'`
 `listen`                          `{host=, port=, tls=t|f, tls_options=}`
 `tls_options`                     options for [libtls]
 --------------------------------- --------------------------------------------

@@ -1,26 +1,14 @@
 
 local ffi = require'ffi'
 ffi.tls_libname = 'tls_libressl'
-
-local sock    = require'sock'
-local socktls = require'sock_libtls'
 local server  = require'http_server'
-local zlib    = require'zlib'
-
-server.tcp           = sock.tcp
-server.newthread     = sock.newthread
-server.resume        = sock.resume
-server.currentthread = sock.currentthread
-server.cosafewrap    = sock.cosafewrap
-server.stcp          = socktls.server_stcp
-server.http.zlib     = zlib
-
 local libtls = require'libtls'
 libtls.debug = print
 
 --local webb_respond = require'http_server_webb'
 
 local server = server:new{
+	libs = 'sock sock_libtls zlib',
 	listen = {
 		{
 			host = 'localhost',
@@ -58,4 +46,4 @@ local server = server:new{
 	--respond = webb_respond,
 }
 
-sock.start()
+server.start()

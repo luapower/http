@@ -4,19 +4,7 @@ ffi.tls_libname = 'tls_bearssl'
 --ffi.tls_libname = 'tls_libressl'
 
 local client  = require'http_client'
-local sock    = require'sock'
-local socktls = require'sock_libtls'
-local zlib    = require'zlib'
 local time    = require'time'
-
-client.tcp           = sock.tcp
-client.stcp          = socktls.client_stcp
-client.stcp_config   = socktls.config
-client.cosafewrap    = sock.cosafewrap
-client.suspend       = sock.suspend
-client.resume        = sock.resume
-client.currentthread = sock.currentthread
-client.http.zlib     = zlib
 
 local function search_page_url(pn)
 	return 'https://luapower.com/'
@@ -36,12 +24,13 @@ local client = client:new{
 	max_conn = 5,
 	max_pipelined_requests = 10,
 	debug = {protocol = true},
+	libs = 'sock sock_libtls zlib',
 }
 local n = 0
 for i=1,1 do
-	sock.resume(sock.newthread(function()
+	client.resume(client.newthread(function()
 		print('sleep .5')
-		sock.sleep(.5)
+		client.sleep(.5)
 		local res, req, err_class = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
 			host = 'luapower.com', uri = '/',
@@ -60,13 +49,13 @@ for i=1,1 do
 			n = n + (res and res.content and #res.content or 0)
 		else
 			print('sleep .5')
-			sock.sleep(.5)
+			client.sleep(.5)
 			print('ERROR:', req)
 		end
 	end))
 end
 local t0 = time.clock()
-sock.start()
+client.start()
 t1 = time.clock()
 print(mbytes(n / (t1 - t0))..'/s')
 
