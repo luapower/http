@@ -8,6 +8,7 @@ local time = require'time'
 local glue = require'glue'
 local errors = require'errors'
 local stream = require'stream'
+local linebuffer = require'linebuffer'
 local http_headers = require'http_headers'
 local ffi = require'ffi'
 local _ = string.format
@@ -98,7 +99,7 @@ function http:create_linebuffer()
 	local function read(buf, sz)
 		return self.tcp:recv(buf, sz, self.read_expires)
 	end
-	self.linebuffer = stream.linebuffer(read, '\r\n', self.max_line_size)
+	self.linebuffer = linebuffer(read, '\r\n', self.max_line_size)
 end
 
 --request line & status line -------------------------------------------------
