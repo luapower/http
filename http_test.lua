@@ -110,7 +110,7 @@ local function test_server()
 				i = i + 1
 				return i == 1 and '123' or i == 2 and '4567890' or nil
 			end
-			local res = server:make_response(req, {
+			local res = server:build_response(req, {
 				content = gen_content,
 				--close = true,
 				compress = true,

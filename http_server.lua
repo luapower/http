@@ -102,7 +102,7 @@ function server:new(t)
 
 			local function send_response(opt)
 				sending_response = true
-				local res = http:make_response(req, opt, self:time())
+				local res = http:build_response(req, opt, self:time())
 				local ok, err = http:send_response(res)
 				if not ok then
 					self:error('send_response(): %s', err)

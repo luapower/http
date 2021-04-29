@@ -419,7 +419,7 @@ end
 
 local creq = {}
 
-function http:make_request(t, cookies)
+function http:build_request(t, cookies)
 	local req = glue.object(creq, {http = self, type = 'http_request'})
 
 	req.http_version = t.http_version or '1.1'
@@ -659,7 +659,7 @@ end
 
 local sres = {}
 
-function http:make_response(req, opt, time)
+function http:build_response(req, opt, time)
 	local res = glue.object(self.response, {http = self, request = req, type = 'http_response'})
 	res.headers = {}
 

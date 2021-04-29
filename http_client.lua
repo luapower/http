@@ -427,7 +427,7 @@ function client:request(t)
 	local cookies = self:get_cookies(target.client_ip, target.host,
 		t.uri or '/', target.http_args.https)
 
-	local req = http:make_request(t, cookies)
+	local req = http:build_request(t, cookies)
 
 	self:dbg(target, '+SEND_REQUEST', '%s.%s.%s %s %s',
 		target, http, req, req.method, req.uri)
