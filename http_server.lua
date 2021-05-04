@@ -40,7 +40,6 @@ function server:bind_libs(libs)
 			self.tcp           = sock.tcp
 			self.cosafewrap    = sock.cosafewrap
 			self.newthread     = sock.newthread
-			self.suspend       = sock.suspend
 			self.resume        = sock.resume
 			self.start         = sock.start
 			self.sleep         = sock.sleep
