@@ -55,6 +55,10 @@ function client:bind_libs(libs)
 			local socktls = require'sock_libtls'
 			self.stcp          = socktls.client_stcp
 			self.stcp_config   = socktls.config
+		elseif lib == 'sock_libtls1' then
+			local socktls = require'sock_libtls1'
+			self.stcp          = socktls.client_stcp
+			self.stcp_config   = socktls.config
 		elseif lib == 'zlib' then
 			self.http.zlib = require'zlib'
 		else
@@ -200,10 +204,16 @@ function client:connect_now(target)
 		self:dec_conn_count(target)
 		return nil, err, errcode
 	end
-	glue.after(tcp, 'close', function(tcp)
-		self:dbg(target, '-CLOSE', '%s', tcp)
-		self:dec_conn_count(target)
-		self:resume_next_wait_conn_thread()
+	local function pass(closed, ...)
+		if not closed then
+			self:dbg(target, '-CLOSE', '%s', tcp)
+			self:dec_conn_count(target)
+			self:resume_next_wait_conn_thread()
+		end
+		return ...
+	end
+	glue.override(tcp, 'close', function(inherited, tcp, ...)
+		return pass(tcp:closed(), inherited(tcp, ...))
 	end)
 	if target.http_args.https then
 		local stcp, err, errcode = self.stcp(tcp, host, self:stcp_options(host, port))

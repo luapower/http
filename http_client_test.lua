@@ -1,7 +1,7 @@
 
 local ffi = require'ffi'
-ffi.tls_libname = 'tls_bearssl'
---ffi.tls_libname = 'tls_libressl'
+--ffi.tls_libname = 'tls_bearssl'
+ffi.tls_libname = 'tls_libressl'
 
 local client  = require'http_client'
 local time    = require'time'
