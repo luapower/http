@@ -48,6 +48,7 @@ function client:bind_libs(libs)
 			self.newthread     = sock.newthread
 			self.suspend       = sock.suspend
 			self.resume        = sock.resume
+			self.thread        = sock.thread
 			self.start         = sock.start
 			self.sleep         = sock.sleep
 			self.currentthread = sock.currentthread

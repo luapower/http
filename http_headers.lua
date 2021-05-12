@@ -2,8 +2,6 @@
 --http header values parsing and formatting.
 --Written by Cosmin Apreutesei. Public Domain.
 
-if not ... then require'anaf'; return end
-
 local glue = require'glue'
 local b64 = require'libb64'
 local http_date = require'http_date'
@@ -757,6 +755,10 @@ function format.cookie(t)
 	return #dt > 0 and concat(dt, ';')
 end
 
+local format_cookie_attr = {
+	Expires = date,
+}
+
 function format.set_cookie(t)
 	for k,c in pairs(t) do
 		if type(c) == 'string' then c = {value = c} end
@@ -769,7 +771,8 @@ function format.set_cookie(t)
 				'invalid cookie attribute name')
 			assert(v == true or not v:find'[%z\1-32\127;]',
 				'invalid cookie attribute value')
-			t[#t+1] = v == true and k or _('%s=%s', k, tostring(v))
+			local format_val = format_cookie_attr[k] or tostring
+			t[#t+1] = v == true and k or _('%s=%s', k, format_val[v])
 		end
 		local attrs = #t > 0 and ';'..concat(t, ';') or ''
 		dt[#dt+1] = _('%s=%s%s', k, q(v), attrs)
@@ -844,7 +847,7 @@ format.vary = headernames
 format.www_authenticate = ci
 
 --non-standard response headers
-format.x_Forwarded_proto = ci --https|http
+format.x_forwarded_proto = ci --https|http
 format.x_powered_by = nil --PHP/5.2.1
 
 function headers.format_header(k, v)

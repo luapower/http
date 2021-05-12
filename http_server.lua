@@ -41,6 +41,7 @@ function server:bind_libs(libs)
 			self.cosafewrap    = sock.cosafewrap
 			self.newthread     = sock.newthread
 			self.resume        = sock.resume
+			self.thread        = sock.thread
 			self.start         = sock.start
 			self.sleep         = sock.sleep
 			self.currentthread = sock.currentthread
@@ -111,13 +112,10 @@ function server:new(t)
 
 			local function respond_with(opt)
 				if opt.content == nil then
-					local write_body1 = self.cosafewrap(function(yield)
+					write_body = self.cosafewrap(function(yield)
 						opt.content = yield
 						send_response(opt)
 					end)
-					function write_body(...)
-						write_body1(...)
-					end
 					write_body()
 					return write_body
 				else

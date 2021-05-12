@@ -28,7 +28,7 @@ local client = client:new{
 }
 local n = 0
 for i=1,1 do
-	client.resume(client.newthread(function()
+	client.thread(function()
 		print('sleep .5')
 		client.sleep(.5)
 		local res, req, err_class = client:request{
@@ -52,7 +52,7 @@ for i=1,1 do
 			client.sleep(.5)
 			print('ERROR:', req)
 		end
-	end))
+	end)
 end
 local t0 = time.clock()
 client.start()
