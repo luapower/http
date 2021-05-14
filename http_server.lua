@@ -151,8 +151,6 @@ function server:new(t)
 					send_response({content = ''})
 				end
 			end
-			glue.assert(finished, 'write_body() not called for %s [%s]',
-				req.uri, req.method)
 
 			--the request must be entirely read before we can read the next request.
 			if req.body_was_read == nil then
