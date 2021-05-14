@@ -127,7 +127,7 @@ function server:new(t)
 				errors.raise('http_response', err)
 			end
 
-			local ok, err = errors.catch(nil, self.respond, self, req, respond_with, raise_with)
+			local ok, err = errors.catch(nil, self.respond, req, respond_with, raise_with)
 
 			if not ok then
 				if errors.is(err, 'http_response') then
@@ -147,7 +147,8 @@ function server:new(t)
 			if not finished and write_body then --eof not signaled.
 				write_body()
 			end
-			assert(finished, 'write_body() not called')
+			glue.assert(finished, 'write_body() not called for %s [%s]',
+				req.uri, req.method)
 
 			--the request must be entirely read before we can read the next request.
 			if req.body_was_read == nil then
