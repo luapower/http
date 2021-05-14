@@ -144,8 +144,12 @@ function server:new(t)
 				end
 			end
 
-			if not finished and write_body then --eof not signaled.
-				write_body()
+			if not finished then --eof not signaled.
+				if write_body then
+					write_body()
+				else
+					send_response({content = ''})
+				end
 			end
 			glue.assert(finished, 'write_body() not called for %s [%s]',
 				req.uri, req.method)
