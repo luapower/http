@@ -91,7 +91,7 @@ function dbg:install_to_http(http)
 		local S = dbg:id(http.tcp) or '-'
 		local T = dbg:id(http.currentthread()) or 'TM'
 		local t1, dt = dbg:clock(tag)
-		print(_('%6.2fs %5.2fs %-4s %-4s %s %s', t1, dt, T, S, cmd, s))
+		print(_('%6.2fs %6.2fs %-4s %-4s %s %s', t1, dt, T, S, cmd, s))
 	end
 
 	if http.debug.protocol then
@@ -168,7 +168,7 @@ function dbg:install_to_client(client)
 	local dbg = self
 	function client:dbg(target, event, fmt, ...)
 		local t1, dt = dbg:clock'request'
-		print(_('%6.2fs %5.2fs %-4s %-4s %-20s %s',
+		print(_('%6.2fs %6.2fs %-4s %-4s %-20s %s',
 			t1, dt,
 			dbg:id(self.currentthread()) or 'TM',
 			dbg:id(target),
@@ -195,7 +195,7 @@ function dbg:install_to_server(server)
 	local dbg = self
 	function server:dbg(event, tcp, fmt, ...)
 		local t1, dt = dbg:clock'request'
-		print(_('%6.2fs %5.2fs %-4s %-4s %-20s %s',
+		print(_('%6.2fs %6.2fs %-4s %-4s %-20s %s',
 			t1, dt,
 			dbg:id(self.currentthread()) or 'TM',
 			dbg:id(tcp),

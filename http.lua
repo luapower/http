@@ -318,18 +318,20 @@ function http:chained_decoder(write, encodings)
 	return write
 end
 
+--TODO: avoid string creation
 function http:zlib_encoder(format, content, content_size)
 	assert(self.zlib, 'zlib not loaded')
 	if type(content) == 'string' then
 		return self.zlib.deflate(content, '', nil, format)
 	elseif type(content) == 'cdata' then
-		--TODO: avoid string creation
-		return self.zlib.deflate(ffi.string(content, content_size), '', nil, format)
-	else
+		local s = ffi.string(content, content_size)
+		return self.zlib.deflate(s, '', nil, format)
+	elseif type(content) == 'function' then
 		return self.cosafewrap(function(yield)
-			--TODO: avoid string creation
 			self.zlib.deflate(content, yield, nil, format)
 		end)
+	else
+		assert(false)
 	end
 end
 

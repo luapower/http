@@ -342,7 +342,7 @@ function parse.expect(s) --1#( "100-continue" | ( token "=" ( token | quoted-str
 end
 
 parse.expires = date
-parse.from = glue.pass --email-address
+parse.from = nil --email-address
 
 function parse.host(s) --host [ ":" port ]
 	local host, port = s:match'^(.-) ?: ?(.*)$'
@@ -621,7 +621,7 @@ end
 parse.x_requested_with = name   --"XMLHttpRequest"
 parse.x_forwarded_for = nameset --client1, proxy1, proxy2
 parse.x_forwarded_proto = name  --"https" | "http"
-parse.x_powered_by = glue.pass  --PHP/5.2.1
+parse.x_forwarded_port = int
 
 --parsing API
 
