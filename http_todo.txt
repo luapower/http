@@ -7,10 +7,6 @@
 
 - close all connections after loop exits.
 
-- socketloop: timers
-	- socketloop: timeouts
-	- socketloop: sleep
-
 ------------------------------------------------------------------------------
 
 - websockets
