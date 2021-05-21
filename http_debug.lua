@@ -113,7 +113,7 @@ function dbg:install_to_http(http)
 		local P = function(cmd, s)
 			local len = s and _('%5d', #s) or '     '
 			local s = s and s
-				:gsub('\r\n', '\n'..(' '):rep(34))
+				:gsub('\r\n', '\n'..(' '):rep(30))
 				:gsub('\n%s*$', '')
 				:gsub('[%z\1-\9\11-\31\128-\255]', '.') or ''
 			D('stream', cmd, _('%s %s', len, s))
@@ -122,14 +122,14 @@ function dbg:install_to_http(http)
 		glue.override(http.tcp, 'recv', function(inherited, self, buf, ...)
 			local sz, err, errcode = inherited(self, buf, ...)
 			if not sz then return nil, err, errcode end
-			P(' <', ffi.string(buf, sz))
+			P('<', ffi.string(buf, sz))
 			return sz
 		end)
 
 		glue.override(http.tcp, 'send', function(inherited, self, buf, ...)
 			local sz, err, errcode = inherited(self, buf, ...)
 			if not sz then return nil, err, errcode end
-			P(' >', ffi.string(buf, sz))
+			P('>', ffi.string(buf, sz))
 			return sz
 		end)
 
@@ -168,7 +168,7 @@ function dbg:install_to_client(client)
 	local dbg = self
 	function client:dbg(target, event, fmt, ...)
 		local t1, dt = dbg:clock'request'
-		print(_('%6.2fs %6.2fs %-4s %-4s %-20s %s',
+		print(_('%6.2fs %6.2fs %-4s %-4s %-12s %s',
 			t1, dt,
 			dbg:id(self.currentthread()) or 'TM',
 			dbg:id(target),
@@ -195,7 +195,7 @@ function dbg:install_to_server(server)
 	local dbg = self
 	function server:dbg(event, tcp, fmt, ...)
 		local t1, dt = dbg:clock'request'
-		print(_('%6.2fs %6.2fs %-4s %-4s %-20s %s',
+		print(_('%6.2fs %6.2fs %-4s %-4s %-12s %s',
 			t1, dt,
 			dbg:id(self.currentthread()) or 'TM',
 			dbg:id(tcp),
