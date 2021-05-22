@@ -1,11 +1,14 @@
 
-io.stdout:setvbuf'no'
-
 local ffi = require'ffi'
 local time = require'time'
 local glue = require'glue'
 local attr = glue.attr
 local _ = string.format
+
+local function print(...)
+	_G.print(...)
+	io.stdout:flush()
+end
 
 local dbg = {getaddr = {}, is = {}, prefixes = {}}
 function dbg.is.thread(t)
