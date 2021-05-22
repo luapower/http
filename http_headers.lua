@@ -653,7 +653,6 @@ end
 --formatting -----------------------------------------------------------------
 
 local ci = string.lower
-local base64 = b64.encode_string
 
 local function int(v)
 	glue.assert(math.floor(v) == v, 'integer expected')

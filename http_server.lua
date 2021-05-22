@@ -173,6 +173,9 @@ function server:new(t)
 	self.sockets = {}
 
 	for i,t in ipairs(self.listen) do
+		if t.listen == false then
+			goto continue
+		end
 
 		local tcp = assert(self.tcp())
 		local host, port = t.host or '*', t.port or (t.tls and 443 or 80)
