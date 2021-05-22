@@ -1,4 +1,6 @@
 
+io.stdout:setvbuf'no'
+
 local ffi = require'ffi'
 local time = require'time'
 local glue = require'glue'
