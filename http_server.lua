@@ -1,6 +1,4 @@
 
-if not ... then require'luapower_server'; return end
-
 local http = require'http'
 local time = require'time'
 local glue = require'glue'
