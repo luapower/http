@@ -173,19 +173,19 @@ function server:new(t)
 	self.sockets = {}
 
 	for i,t in ipairs(self.listen) do
-		if t.listen == false then
+		if t.addr == false then
 			goto continue
 		end
 
 		local tcp = assert(self.tcp())
-		local host, port = t.host or '*', t.port or (t.tls and 443 or 80)
+		local addr, port = t.addr or '*', t.port or (t.tls and 443 or 80)
 
-		local ok, err, errcode = tcp:listen(host, port)
+		local ok, err, errcode = tcp:listen(addr, port)
 		if not ok then
-			self:error('listen("%s", %s): %s [%s]', host, port, err, errcode)
+			self:error('listen("%s", %s): %s [%s]', addr, port, err, errcode)
 			goto continue
 		end
-		self:dbg('LISTEN', tcp, '%s:%d', host, port)
+		self:dbg('LISTEN', tcp, '%s:%d', addr, port)
 
 		if t.tls then
 			local opt = glue.update(self.tls_options, t.tls_options)
