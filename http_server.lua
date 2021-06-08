@@ -129,7 +129,8 @@ function server:new(t)
 				self:dbg(s, ctcp, ...)
 			end
 
-			local ok, err = errors.catch(nil, self.respond, req, respond_with, raise_with, debug_with)
+			local ok, err = errors.catch(nil, self.respond, req,
+				respond_with, raise_with, debug_with)
 
 			if not ok then
 				if errors.is(err, 'http_response') then
