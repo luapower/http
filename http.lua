@@ -420,6 +420,7 @@ end
 --client-side ----------------------------------------------------------------
 
 local creq = {}
+http.client_request_class = creq
 
 function http:build_request(t, cookies)
 	local req = glue.object(creq, {http = self, type = 'http_request'})
@@ -572,7 +573,8 @@ http:protect'read_response'
 
 --server side ----------------------------------------------------------------
 
-local sreq = {} --server-side request object
+local sreq = {}
+http.server_request_class = sreq
 
 function http:read_request()
 	local req = glue.object(sreq, {http = self})

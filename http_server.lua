@@ -3,7 +3,6 @@ local http = require'http'
 local time = require'time'
 local glue = require'glue'
 local errors = require'errors'
-local coro = require'coro'
 
 local _ = string.format
 local attr = glue.attr
@@ -108,7 +107,7 @@ function server:new(t)
 				finished = true
 			end
 
-			local function respond_with(opt)
+			function req.respond(req, opt)
 				if opt.content == nil then
 					write_body = self.cosafewrap(function(yield)
 						opt.content = yield
@@ -121,23 +120,29 @@ function server:new(t)
 				end
 			end
 
-			local function raise_with(err)
+			function req.raise(req, status, fmt, ...)
+				local err
+				if type(status == 'table') then
+					err = status
+				else
+					local msg = type(fmt) == 'string' and _(fmt, ...) or fmt
+					err = {status = status, status_message = msg and tostring(msg)}
+				end
 				errors.raise('http_response', err)
 			end
 
-			local function debug_with(s, ...)
+			function req.dbg(req, s, ...)
 				self:dbg(s, ctcp, ...)
 			end
 
-			local ok, err = errors.catch(nil, self.respond, req,
-				respond_with, raise_with, debug_with)
+			local ok, err = errors.catch(nil, self.respond, req, self.currentthread())
 
 			if not ok then
 				if errors.is(err, 'http_response') then
 					assert(not sending_response, 'response already sent')
-					respond_with(err)
+					req:respond(err)
 				elseif not sending_response then
-					respond_with{
+					req:respond{
 						status = 500,
 						content = err,
 					}

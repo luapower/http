@@ -34,6 +34,9 @@ dbg.getaddr.target = tostring
 function dbg.getaddr.luasocket_socket(sock)
 	return tostring(sock):match'tcp{%w+}: (%x+)'
 end
+function dbg.getaddr.thread(co)
+	return require'coro'.name(co) or getaddr_table(co)
+end
 function dbg:addr(t)
 	local type = self:type(t)
 	local getaddr = self.getaddr[type] or getaddr_table
