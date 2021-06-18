@@ -331,7 +331,7 @@ function http:zlib_encoder(format, content, content_size)
 			self.zlib.deflate(content, yield, nil, format)
 		end)
 	else
-		assert(false)
+		assert(false, type(content))
 	end
 end
 

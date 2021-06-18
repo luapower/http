@@ -142,10 +142,7 @@ function server:new(t)
 					assert(not sending_response, 'response already sent')
 					req:respond(err)
 				elseif not sending_response then
-					req:respond{
-						status = 500,
-						content = err,
-					}
+					req:respond{status = 500}
 					self:error('respond(): %s', err)
 				else
 					error(('respond(): %s'):format(err))
