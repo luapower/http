@@ -4,7 +4,7 @@ local time = require'time'
 local glue = require'glue'
 local errors = require'errors'
 
-local _ = string.format
+local fmt = string.format
 local attr = glue.attr
 local push = table.insert
 
@@ -57,9 +57,11 @@ function server:time(ts)
 	return glue.time(ts)
 end
 
-function server:error(fmt, ...)
-	print(string.format(fmt, ...))
+function server:err(tcp, ...)
+	self:dbg('ERROR', tcp, ...)
 end
+
+server.cleanup = glue.noop --request cleanup stub
 
 function server:new(t)
 
@@ -90,7 +92,7 @@ function server:new(t)
 			local req, err = http:read_request()
 			if not req then
 				if not (errors.is(err, 'socket') and err.message == 'closed') then
-					self:error('read_request(): %s', err)
+					self:err(ctcp, 'read_request(): %s', err)
 				end
 				break
 			end
@@ -102,7 +104,7 @@ function server:new(t)
 				local res = http:build_response(req, opt, self:time())
 				local ok, err = http:send_response(res)
 				if not ok then
-					self:error('send_response(): %s', err)
+					self:err(ctcp, 'send_response(): %s', err)
 				end
 				finished = true
 			end
@@ -120,12 +122,12 @@ function server:new(t)
 				end
 			end
 
-			function req.raise(req, status, fmt, ...)
+			function req.raise(req, status, s, ...)
 				local err
 				if type(status == 'table') then
 					err = status
 				else
-					local msg = type(fmt) == 'string' and _(fmt, ...) or fmt
+					local msg = type(s) == 'string' and fmt(s, ...) or s
 					err = {status = status, status_message = msg and tostring(msg)}
 				end
 				errors.raise('http_response', err)
@@ -136,20 +138,19 @@ function server:new(t)
 			end
 
 			local ok, err = errors.catch(nil, self.respond, req, self.currentthread())
+			self.cleanup()
 
 			if not ok then
 				if errors.is(err, 'http_response') then
 					assert(not sending_response, 'response already sent')
 					req:respond(err)
 				elseif not sending_response then
+					self:err(ctcp, 'respond(): %s', err)
 					req:respond{status = 500}
-					self:error('respond(): %s', err)
 				else
-					error(('respond(): %s'):format(err))
+					error(fmt('respond(): %s', err))
 				end
-			end
-
-			if not finished then --eof not signaled.
+			elseif not finished then --eof not signaled.
 				if write_body then
 					write_body()
 				else
@@ -183,7 +184,7 @@ function server:new(t)
 
 		local ok, err, errcode = tcp:listen(addr, port)
 		if not ok then
-			self:error('listen("%s", %s): %s [%s]', addr, port, err, errcode)
+			self:err(tcp, 'listen("%s", %s): %s [%s]', addr, port, err, errcode)
 			goto continue
 		end
 		self:dbg('LISTEN', tcp, '%s:%d', addr, port)
@@ -192,7 +193,7 @@ function server:new(t)
 			local opt = glue.update(self.tls_options, t.tls_options)
 			local stcp, err = self.stcp(tcp, opt)
 			if not stcp then
-				self:error('stcp(): %s', err)
+				self:err('stcp(): %s', err)
 				tcp:close()
 				goto continue
 			end
@@ -204,13 +205,13 @@ function server:new(t)
 			local ctcp, err, errcode = tcp:accept()
 			ctcp.n = n
 			if not ctcp then
-				self:error('accept(): %s [%s]', err, errcode)
+				self:err(tcp, 'accept(): %s [%s]', err, errcode)
 				return
 			end
 			self.resume(self.newthread(function()
 				local ok, err = xpcall(handler, debug.traceback, ctcp, t)
 				if not ok then
-					self:error('handler(): %s', err)
+					self:err(ctcp, 'handler(): %s', err)
 				end
 				ctcp:close()
 			end))
