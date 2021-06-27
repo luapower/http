@@ -188,6 +188,10 @@ function client:stcp_options(host, port)
 	return self._tls_config
 end
 
+function client:resolve(host) --stub (use a resolver)
+	return host
+end
+
 function client:connect_now(target)
 	local host, port, client_ip = target()
 	local tcp, err, errcode = self.tcp()
@@ -199,7 +203,7 @@ function client:connect_now(target)
 	self:inc_conn_count(target)
 	local dt = target.connect_timeout
 	local expires = dt and time.clock() + dt or nil
-	local ok, err, errcode = tcp:connect(host, port, expires)
+	local ok, err, errcode = tcp:connect(self:resolve(host), port, expires)
 	self:dbg(target, '+CONNECT', '%s %s', tcp, err or '')
 	if not ok then
 		self:dec_conn_count(target)

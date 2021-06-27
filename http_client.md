@@ -36,6 +36,7 @@ Create a client object. The `opt` table can contain:
 `max_redirects`                   number of redirects before giving up
 `debug`                           `true` to enable client-level debugging
 `tls_options`                     options for [libtls]
+`resolve`                         DNS resolver function: `resolve(client, host) -> ip`
 --------------------------------- --------------------------------------------
 
 Note: A _target_ is a combination of (vhost, port, client_ip) on which
