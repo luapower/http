@@ -124,11 +124,13 @@ function server:new(t)
 
 			function req.raise(req, status, s, ...)
 				local err
-				if type(status == 'table') then
-					err = status
-				else
+				if type(status) == 'number' then
 					local msg = type(s) == 'string' and fmt(s, ...) or s
 					err = {status = status, status_message = msg and tostring(msg)}
+				elseif type(status) == 'table' then
+					err = status
+				else
+					assert(false)
 				end
 				errors.raise('http_response', err)
 			end
