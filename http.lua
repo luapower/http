@@ -336,27 +336,25 @@ function http:zlib_encoder(format, content, content_size)
 end
 
 function http:send_body(content, content_size, transfer_encoding, close)
-	if content then
-		if transfer_encoding == 'chunked' then
-			self:send_chunked(content)
-		else
-			assert(not transfer_encoding, 'invalid transfer-encoding')
-			if type(content) == 'function' then
-				local total = 0
-				while true do
-					local chunk, len = content()
-					if not chunk then break end
-					local len = len or #chunk
-					total = total + len
-					self:dbg('>>', '%7d bytes total', len)
-					self:send(chunk, len)
-				end
-				self:dbg('>>', '%7d bytes total', total)
-			else
-				local len = content_size or #content
-				self:dbg('>>', '%7d bytes', len)
-				self:send(content, content_size)
+	if transfer_encoding == 'chunked' then
+		self:send_chunked(content)
+	else
+		assert(not transfer_encoding, 'invalid transfer-encoding')
+		if type(content) == 'function' then
+			local total = 0
+			while true do
+				local chunk, len = content()
+				if not chunk then break end
+				local len = len or #chunk
+				total = total + len
+				self:dbg('>>', '%7d bytes total', len)
+				self:send(chunk, len)
 			end
+			self:dbg('>>', '%7d bytes total', total)
+		else
+			local len = content_size or #content
+			self:dbg('>>', '%7d bytes', len)
+			self:send(content, content_size)
 		end
 	end
 	self:dbg('  ', '')
@@ -448,7 +446,7 @@ function http:build_request(t, cookies)
 	req.headers['cookie'] = cookies
 
 	req.content, req.content_size = t.content, t.content_size
-	if req.content and self.zlib and t.compress ~= false then
+	if self.zlib and t.compress ~= false then
 		req.headers['content-encoding'] = 'gzip'
 		req.content, req.content_size =
 			self:encode_content(req.content, req.content_size, 'gzip')

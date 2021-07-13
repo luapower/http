@@ -100,6 +100,9 @@ function server:new(t)
 			local finished, write_body, sending_response
 
 			local function send_response(opt)
+				if opt.content == nil then
+					opt.content = ''
+				end
 				sending_response = true
 				local res = http:build_response(req, opt, self:time())
 				local ok, err = http:send_response(res)
@@ -109,13 +112,13 @@ function server:new(t)
 				finished = true
 			end
 
-			function req.respond(req, opt)
-				if opt.content == nil then
+			function req.respond(req, opt, want_write_body)
+				if want_write_body then
 					write_body = self.cosafewrap(function(yield)
 						opt.content = yield
 						send_response(opt)
 					end)
-					write_body()
+					write_body() --eof
 					return write_body
 				else
 					send_response(opt)
@@ -154,9 +157,9 @@ function server:new(t)
 				end
 			elseif not finished then --eof not signaled.
 				if write_body then
-					write_body()
+					write_body() --eof
 				else
-					send_response({content = ''})
+					send_response({})
 				end
 			end
 
