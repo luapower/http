@@ -190,7 +190,7 @@ function http:send_headers(headers)
 			if v then
 				if type(v) == 'table' then --must be sent unfolded.
 					for i,v in ipairs(v) do
-						self:dbg('->', '%-19s %s', v)
+						self:dbg('->', '%-17s %s', k, v)
 						self:send(_('%s: %s\r\n', k, v))
 					end
 				else

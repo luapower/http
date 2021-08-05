@@ -588,7 +588,9 @@ function parse.cookie(s)
 	local dt = {}
 	for s in s:gmatch'[^;,]+' do --name1=val1; ...
 		local k, v = s:match'^%s*(.-)%s*=%s*(.-)%s*$'
-		dt[k] = v:gsub('^"(.-)"$', '%1')
+		if k then
+			dt[k] = v:gsub('^"(.-)"$', '%1')
+		end
 	end
 	return dt
 end
@@ -759,19 +761,24 @@ local format_cookie_attr = {
 }
 
 function format.set_cookie(t)
+	local dt = {}
 	for k,c in pairs(t) do
-		if type(c) == 'string' then c = {value = c} end
+		if type(c) == 'string' then
+			c = {value = c, attrs = {}}
+		end
 		assert(token(k), 'invalid cookie name')
-		assert(cookie_value(c.value), 'invalid cookie value')
+		local v = assert(cookie_value(c.value), 'invalid cookie value')
 		local t = {}
-		for k,v in pairs(t) do
-			k = k:lower()
-			assert(not k:find'[%z\1-32\127;=]',
-				'invalid cookie attribute name')
-			assert(v == true or not v:find'[%z\1-32\127;]',
-				'invalid cookie attribute value')
-			local format_val = format_cookie_attr[k] or tostring
-			t[#t+1] = v == true and k or _('%s=%s', k, format_val[v])
+		for k,v in pairs(c.attrs) do
+			assert(not k:find'[%z\1-\32\127;=]', 'invalid cookie attribute name')
+			if v == true then
+				t[#t+1] = k
+			else
+				local format_val = format_cookie_attr[k] or tostring
+				v = format_val(v)
+				assert(not v:find'[%z\1-\31\127;]', 'invalid cookie attribute value')
+				t[#t+1] = _('%s=%s', k, v)
+			end
 		end
 		local attrs = #t > 0 and ';'..concat(t, ';') or ''
 		dt[#dt+1] = _('%s=%s%s', k, q(v), attrs)
@@ -855,7 +862,7 @@ function headers.format_header(k, v)
 		local f = format[k:gsub('-', '_')]
 		if f then v = f(v) end
 	end
-	return k, v and tostring(v)
+	return k, v
 end
 
 return headers
