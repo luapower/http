@@ -125,11 +125,10 @@ function server:new(t)
 				end
 			end
 
-			function req.raise(req, status, s, ...)
+			function req.raise(req, status, content)
 				local err
 				if type(status) == 'number' then
-					local msg = type(s) == 'string' and fmt(s, ...) or s
-					err = {status = status, status_message = msg and tostring(msg)}
+					err = {status = status, content = content}
 				elseif type(status) == 'table' then
 					err = status
 				else
