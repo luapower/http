@@ -7,7 +7,6 @@ if not ... then require'http_server_test'; return end
 local time = require'time'
 local glue = require'glue'
 local errors = require'errors'
-local stream = require'stream'
 local linebuffer = require'linebuffer'
 local http_headers = require'http_headers'
 local ffi = require'ffi'
@@ -52,11 +51,8 @@ end
 --low-level I/O API ----------------------------------------------------------
 
 function http:create_send_function()
-	local send = stream.repeatwriter(function(buf, sz)
-		return self.tcp:send(buf, sz, self.send_expires)
-	end)
 	function self:send(buf, sz)
-		self:check_io(send(buf, sz))
+		self:check_io(self.tcp:send(buf, sz, self.send_expires))
 	end
 end
 
@@ -86,8 +82,9 @@ function http:read_until_closed(write_content)
 	while true do
 		local buf, sz = read(1/0)
 		if not buf then
-			if sz == 'closed' then return end
 			self:check_io(nil, sz)
+		elseif sz == 0 then
+			break
 		end
 		write_content(buf, sz)
 	end
@@ -353,8 +350,10 @@ function http:send_body(content, content_size, transfer_encoding, close)
 			self:dbg('>>', '%7d bytes total', total)
 		else
 			local len = content_size or #content
-			self:dbg('>>', '%7d bytes', len)
-			self:send(content, content_size)
+			if len > 0 then
+				self:dbg('>>', '%7d bytes', len)
+				self:send(content, len)
+			end
 		end
 	end
 	self:dbg('  ', '')
@@ -395,9 +394,9 @@ end
 function http:read_body(headers, write, from_server, close, state)
 	if write == 'string' or write == 'buffer' then
 		local to_string = write == 'string'
-		local write, get = stream.dynarray_writer()
+		local write, collect = glue.dynarray_pump()
 		self:read_body_to_writer(headers, write, from_server, close, state)
-		local buf, sz = get()
+		local buf, sz = collect()
 		if to_string then
 			return ffi.string(buf, sz)
 		else
@@ -493,11 +492,7 @@ function http:cookie_default_path(req_uri)
 	return '/' --TODO
 end
 
---either cookie domain matches host exactly or domain is a suffix
---    - The domain string is a suffix of the string.
---	  - The last character of the string that is not included in the domain string
---	    is a %x2E (".") character.
---a host name (i.e., not an IP address).
+--either the cookie domain matches host exactly or the domain is a suffix.
 function http:cookie_domain_matches_request_host(domain, host)
 	return not domain or domain == host or (
 		host:sub(-#domain) == domain

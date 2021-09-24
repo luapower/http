@@ -6,8 +6,7 @@ HTTP 1.1 coroutine-based async server in Lua.
 Features, https, gzip compression, persistent connections, pipelining,
 resource limits, multi-level debugging, cdata-buffer-based I/O.
 
-Uses [sock] and [libtls] for I/O and TLS or you can bring your own stack
-(see `loop` option below).
+Uses [sock] and [libtls] for I/O and TLS or you can bring your own stack.
 
 GZip compression can be enabled with `client.http.zlib = require'zlib'`.
 

@@ -5,7 +5,7 @@ HTTP 1.1 client & server protocol in Lua.
 
 Works over an user-provided I/O API with three methods:
 
- * `http.tcp:recv(buf, maxlen, [expires]) -> recv_len | nil,'closed' | nil,err`
+ * `http.tcp:recv(buf, maxlen, [expires]) -> recv_len | nil,err`
  * `http.tcp:send(s|buf, [len], [expires]) -> sent_len | nil,err`
  * `http.tcp:close([expires])`
 

@@ -1,4 +1,6 @@
 
+if not ... then require'http_server_test'; return end
+
 local http = require'http'
 local time = require'time'
 local glue = require'glue'
@@ -91,7 +93,7 @@ function server:new(t)
 
 			local req, err = http:read_request()
 			if not req then
-				if not (errors.is(err, 'socket') and err.message == 'closed') then
+				if not (errors.is(err, 'socket') and err.message == 'eof') then
 					self:err(ctcp, 'read_request(): %s', err)
 				end
 				break
@@ -141,7 +143,9 @@ function server:new(t)
 				self:dbg(s, ctcp, ...)
 			end
 
-			local ok, err = errors.catch(nil, self.respond, req, self.currentthread())
+			req.thread = self.currentthread()
+
+			local ok, err = errors.catch(nil, self.respond, req)
 			self.cleanup()
 
 			if not ok then
