@@ -12,7 +12,7 @@ local http_headers = require'http_headers'
 local ffi = require'ffi'
 local _ = string.format
 
-local http = {type = 'http_connection', dbg = glue.noop}
+local http = {type = 'http_connection', debug_prefix = 'H', dbg = glue.noop}
 
 --error handling -------------------------------------------------------------
 
@@ -420,7 +420,8 @@ local creq = {}
 http.client_request_class = creq
 
 function http:build_request(t, cookies)
-	local req = glue.object(creq, {http = self, type = 'http_request'})
+	local req = glue.object(creq,
+		{http = self, type = 'http_request', debug_prefix = 'R'})
 
 	req.http_version = t.http_version or '1.1'
 	req.method = t.method or 'GET'
@@ -657,7 +658,8 @@ end
 local sres = {}
 
 function http:build_response(req, opt, time)
-	local res = glue.object(self.response, {http = self, request = req, type = 'http_response'})
+	local res = glue.object(self.response,
+		{http = self, request = req, type = 'http_response', debug_prefix = '<'})
 	res.headers = {}
 
 	res.http_version = opt.http_version or req.http_version

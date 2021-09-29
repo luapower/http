@@ -93,6 +93,7 @@ function client:target(t) --t is request options
 	local target = self.targets(host, port, client_ip)
 	if not target.type then
 		target.type = 'http_target'
+		target.debug_prefix = '@'
 		target.host = host
 		target.client_ip = client_ip
 		target.connect_timeout = t.connect_timeout
