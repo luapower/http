@@ -1,5 +1,4 @@
 
-local ffi = require'ffi'
 --ffi.tls_libname = 'tls_libressl'
 local server  = require'http_server'
 --local libtls = require'libtls'
@@ -26,9 +25,9 @@ local server = server:new{
 		},
 	},
 	debug = {
-		--protocol = true,
+		protocol = true,
 		--stream = true,
-		--tracebacks = true,
+		tracebacks = true,
 	},
 	respond = function(req, thread)
 		local read_body = req:read_body'reader'

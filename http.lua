@@ -4,7 +4,7 @@
 
 if not ... then require'http_server_test'; return end
 
-local time = require'time'
+local clock = require'time'.clock
 local glue = require'glue'
 local errors = require'errors'
 local linebuffer = require'linebuffer'
@@ -464,7 +464,8 @@ end
 
 function http:send_request(req)
 	local dt = req.request_timeout
-	self.send_expires = dt and time.clock() + dt or nil
+	self.start_time = clock()
+	self.send_expires = dt and self.start_time + dt or nil
 	self:send_request_line(req.method, req.uri, req.http_version)
 	self:send_headers(req.headers)
 	self:send_body(req.content, req.content_size, req.headers['transfer-encoding'])
@@ -533,7 +534,7 @@ function http:read_response(req)
 	res.rawheaders = {}
 
 	local dt = req.reply_timeout
-	self.read_expires = dt and time.clock() + dt or nil
+	self.read_expires = dt and clock() + dt or nil
 
 	res.http_version, res.status = self:read_status_line()
 
@@ -571,6 +572,7 @@ local sreq = {}
 http.server_request_class = sreq
 
 function http:read_request()
+	self.start_time = clock()
 	local req = glue.object(sreq, {http = self})
 	req.http_version, req.method, req.uri = self:read_request_line()
 	req.rawheaders = {}

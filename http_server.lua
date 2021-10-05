@@ -59,10 +59,6 @@ function server:time(ts)
 	return glue.time(ts)
 end
 
-function server:err(tcp, ...)
-	self:dbg('ERROR', tcp, ...)
-end
-
 server.cleanup = glue.noop --request cleanup stub
 
 function server:new(t)
@@ -229,7 +225,7 @@ function server:new(t)
 			while not stop do
 				accept_connection()
 			end
-		end, 'SRV'))
+		end))
 
 		::continue::
 	end
