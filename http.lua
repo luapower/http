@@ -722,12 +722,58 @@ http:protect'send_response'
 
 --instantiation --------------------------------------------------------------
 
+function http:dbg(event, fmt, ...)
+	if debug.nolog[''] then return end
+	local S = self.tcp or '-'
+	local T = self.currentthread()
+	local dt = clock() - self.start_time
+	local s = _(fmt, debug.args(...))
+	dbg('http', event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
+end
+
 function http:new(t)
+
 	local self = glue.object(self, {}, t)
+
 	if self.debug then
-		local dbg = require'http_debug'
-		dbg:install_to_http(self)
+
+		require'$log'
+
+		if self.debug.stream then
+
+			local P = function(event, s)
+				self:dbg(event, '%5s %s', s and #s or '', s or '')
+			end
+
+			glue.override(self.tcp, 'recv', function(inherited, self, buf, ...)
+				local sz, err, errcode = inherited(self, buf, ...)
+				if not sz then return nil, err, errcode end
+				P('<', ffi.string(buf, sz))
+				return sz
+			end)
+
+			glue.override(self.tcp, 'send', function(inherited, self, buf, ...)
+				local sz, err, errcode = inherited(self, buf, ...)
+				if not sz then return nil, err, errcode end
+				P('>', ffi.string(buf, sz))
+				return sz
+			end)
+
+			glue.override(self.tcp, 'close', function(inherited, self, ...)
+				local ok, err, errcode = inherited(self, ...)
+				if not ok then return nil, err, errcode  end
+				P('CC')
+				return ok
+			end)
+
+		end
+
+	else
+
+		self.dbg = glue.noop
+
 	end
+
 	self:create_linebuffer()
 	self:create_send_function()
 	return self

@@ -32,7 +32,6 @@ local client = {
 		ca_file = 'cacert.pem',
 		loadfile = glue.readfile,
 	},
-	dbg = glue.noop,
 }
 
 function client:time(ts)
@@ -519,18 +518,43 @@ end
 
 --instantiation --------------------------------------------------------------
 
+function client:dbg(target, event, fmt, ...)
+	if debug.nolog[''] then return end
+	local T = self.currentthread()
+	local s =_(fmt, debug.args(...))
+	dbg('http-c', event, '%-4s %-4s %s', T, target, s)
+end
+
 function client:new(t)
+
 	local self = glue.object(self, {}, t)
+
 	self.last_client_ip_index = glue.tuples(2)
 	self.targets = glue.tuples(3)
 	self.cookies = {}
+
 	if self.libs then
 		self:bind_libs(self.libs)
 	end
+
 	if self.debug then
-		local dbg = require'http_debug'
-		dbg:install_to_client(self)
+
+		require'$log'
+
+		local function pass(rc, ...)
+			self:dbg(('<'):rep(1+rc)..('-'):rep(78-rc))
+			return ...
+		end
+		glue.override(self, 'request', function(inherited, self, t, ...)
+			local rc = t.redirect_count or 0
+			self:dbg(('>'):rep(1+rc)..('-'):rep(78-rc))
+			return pass(rc, inherited(self, t, ...))
+		end)
+
+	else
+		self.dbg = glue.noop
 	end
+
 	return self
 end
 
