@@ -723,11 +723,11 @@ http:protect'send_response'
 --instantiation --------------------------------------------------------------
 
 function http:dbg(event, fmt, ...)
-	if debug.nolog[''] then return end
-	local S = self.tcp or '-'
+	if logging.filter[''] then return end
 	local T = self.currentthread()
+	local S = self.tcp or '-'
 	local dt = clock() - self.start_time
-	local s = _(fmt, debug.args(...))
+	local s = _(fmt, logging.args(...))
 	dbg('http', event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
 end
 

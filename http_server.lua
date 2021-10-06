@@ -61,23 +61,23 @@ end
 server.cleanup = glue.noop --request cleanup stub
 
 function server:dbg(tcp, event, fmt, ...)
-	if debug.nolog[''] then return end
+	if logging.filter[''] then return end
 	local T = self.currentthread()
-	local s =_(fmt, debug.args(...))
+	local s =_(fmt, logging.args(...))
 	dbg('http-s', event, '%-4s %-4s %s', T, tcp, s)
 end
 
 function server:note(tcp, event, fmt, ...)
-	if debug.nolog.note then return end
+	if logging.filter.note then return end
 	local T = self.currentthread()
-	local s =_(fmt, debug.args(...))
+	local s =_(fmt, logging.args(...))
 	note('http-s', event, '%-4s %-4s %s', T, tcp, s)
 end
 
 function server:logerror(tcp, event, fmt, ...)
-	if debug.nolog.ERROR then return end
+	if logging.filter.ERROR then return end
 	local T = self.currentthread()
-	local s =_(fmt, debug.args(...))
+	local s =_(fmt, logging.args(...))
 	logerror('http-s', event, '%-4s %-4s %s', T, tcp, s)
 end
 
@@ -155,18 +155,6 @@ function server:new(t)
 					assert(false)
 				end
 				errors.raise('http_response', err)
-			end
-
-			function req.dbg(req, event, fmt, ...)
-				self:dbg(ctcp, event, fmt, ...)
-			end
-
-			function req.note(req, event, fmt, ...)
-				self:note(ctcp, event, fmt, ...)
-			end
-
-			function req.logerror(req, event, fmt, ...)
-				self:logerror(ctcp, event, fmt, ...)
 			end
 
 			req.thread = self.currentthread()

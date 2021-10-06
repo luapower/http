@@ -519,9 +519,9 @@ end
 --instantiation --------------------------------------------------------------
 
 function client:dbg(target, event, fmt, ...)
-	if debug.nolog[''] then return end
+	if logging.filter[''] then return end
 	local T = self.currentthread()
-	local s =_(fmt, debug.args(...))
+	local s =_(fmt, logging.args(...))
 	dbg('http-c', event, '%-4s %-4s %s', T, target, s)
 end
 
