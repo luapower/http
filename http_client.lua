@@ -519,10 +519,11 @@ end
 --instantiation --------------------------------------------------------------
 
 function client:dbg(target, event, fmt, ...)
+	local logging = require'logging'
 	if logging.filter[''] then return end
 	local T = self.currentthread()
-	local s =_(fmt, logging.args(...))
-	dbg('http-c', event, '%-4s %-4s %s', T, target, s)
+	local s = fmt and _(fmt, logging.args(...)) or ''
+	logging.dbg('http-c', event, '%-4s %-4s %s', T, target, s)
 end
 
 function client:new(t)
@@ -539,8 +540,6 @@ function client:new(t)
 
 	if self.debug then
 
-		require'$log'
-
 		local function pass(rc, ...)
 			self:dbg(('<'):rep(1+rc)..('-'):rep(78-rc))
 			return ...
@@ -551,8 +550,10 @@ function client:new(t)
 			return pass(rc, inherited(self, t, ...))
 		end)
 
-	else
+	else --don't load the logging module.
+
 		self.dbg = glue.noop
+
 	end
 
 	return self

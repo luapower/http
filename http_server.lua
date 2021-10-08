@@ -6,7 +6,7 @@ local time = require'time'
 local glue = require'glue'
 local errors = require'errors'
 
-local fmt = string.format
+local _ = string.format
 local attr = glue.attr
 local push = table.insert
 
@@ -61,24 +61,27 @@ end
 server.cleanup = glue.noop --request cleanup stub
 
 function server:dbg(tcp, event, fmt, ...)
+	local logging = require'logging'
 	if logging.filter[''] then return end
 	local T = self.currentthread()
-	local s =_(fmt, logging.args(...))
-	dbg('http-s', event, '%-4s %-4s %s', T, tcp, s)
+	local s = fmt and _(fmt, logging.args(...)) or ''
+	logging.dbg('http-s', event, '%-4s %-4s %s', T, tcp, s)
 end
 
 function server:note(tcp, event, fmt, ...)
+	local logging = require'logging'
 	if logging.filter.note then return end
 	local T = self.currentthread()
-	local s =_(fmt, logging.args(...))
-	note('http-s', event, '%-4s %-4s %s', T, tcp, s)
+	local s = fmt and _(fmt, logging.args(...)) or ''
+	logging.note('http-s', event, '%-4s %-4s %s', T, tcp, s)
 end
 
 function server:logerror(tcp, event, fmt, ...)
+	local logging = require'logging'
 	if logging.filter.ERROR then return end
 	local T = self.currentthread()
-	local s =_(fmt, logging.args(...))
-	logerror('http-s', event, '%-4s %-4s %s', T, tcp, s)
+	local s = fmt and _(fmt, logging.args(...)) or ''
+	logging.logerror('http-s', event, '%-4s %-4s %s', T, tcp, s)
 end
 
 function server:new(t)
@@ -89,9 +92,7 @@ function server:new(t)
 		self:bind_libs(self.libs)
 	end
 
-	if self.debug then
-		require'$log'
-	else
+	if not self.debug then --don't load the logging module.
 		self.note = glue.noop
 		self.logerror = glue.noop
 	end
@@ -170,7 +171,7 @@ function server:new(t)
 					self:logerror(ctcp, 'respond', '%s', err)
 					req:respond{status = 500}
 				else
-					error(fmt('respond(): %s', err))
+					error(_('respond(): %s', err))
 				end
 			elseif not finished then --eof not signaled.
 				if write_body then

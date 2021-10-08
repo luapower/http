@@ -722,22 +722,25 @@ http:protect'send_response'
 
 --instantiation --------------------------------------------------------------
 
-function http:dbg(event, fmt, ...)
-	if logging.filter[''] then return end
-	local T = self.currentthread()
-	local S = self.tcp or '-'
-	local dt = clock() - self.start_time
-	local s = _(fmt, logging.args(...))
-	dbg('http', event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
+local function logfunc(funcname)
+	return function(self, event, fmt, ...)
+		local logging = require'logging'
+		if logging.filter[''] then return end
+		local T = self.currentthread()
+		local S = self.tcp or '-'
+		local dt = clock() - self.start_time
+		local s = fmt and _(fmt, logging.args(...)) or ''
+		logging[funcname]('http', event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
+	end
 end
+http.dbg  = logfunc'dbg'
+http.note = logfunc'note'
 
 function http:new(t)
 
 	local self = glue.object(self, {}, t)
 
 	if self.debug then
-
-		require'$log'
 
 		if self.debug.stream then
 
@@ -768,7 +771,7 @@ function http:new(t)
 
 		end
 
-	else
+	else --don't load the logging module.
 
 		self.dbg = glue.noop
 
