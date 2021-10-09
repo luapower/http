@@ -12,7 +12,7 @@ local http_headers = require'http_headers'
 local ffi = require'ffi'
 local _ = string.format
 
-local http = {type = 'http_connection', debug_prefix = 'H', dbg = glue.noop}
+local http = {type = 'http_connection', debug_prefix = 'H'}
 
 --error handling -------------------------------------------------------------
 
@@ -731,7 +731,6 @@ function http:log(severity, module, event, fmt, ...)
 	local s = fmt and _(fmt, logging.args(...)) or ''
 	logging.log(severity, module, event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
 end
-function http:nolog    (...) self:log(''     , ...) end
 function http:dbg      (...) self:log(''     , ...) end
 function http:note     (...) self:log('note' , ...) end
 function http:logerror (...) self:log('ERROR', ...) end
