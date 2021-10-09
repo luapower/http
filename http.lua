@@ -742,8 +742,8 @@ function http:new(t)
 
 	local self = glue.object(self, {}, t)
 
-	if self.debug or self.logging then
-		self.logging = type(self.logging) == 'table' and self.logging or require'logging'
+	if self.debug and (self.logging == nil or self.logging == true) then
+		self.logging = require'logging'
 	end
 
 	if self.debug and self.debug.protocol then

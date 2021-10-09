@@ -80,10 +80,8 @@ function server:new(t)
 		self:bind_libs(self.libs)
 	end
 
-	if self.debug then
+	if self.debug and (self.logging == nil or self.logging == true) then
 		self.logging = require'logging'
-	else
-		self.log = glue.noop
 	end
 
 	local function handler(ctcp, listen_opt)

@@ -541,9 +541,11 @@ function client:new(t)
 		self:bind_libs(self.libs)
 	end
 
-	if self.debug then
-
+	if self.debug and (self.logging == nil or self.logging == true) then
 		self.logging = require'logging'
+	end
+
+	if self.debug then
 
 		local function pass(rc, ...)
 			self:dp(nil, ('<'):rep(1+rc)..('-'):rep(78-rc))
