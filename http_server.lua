@@ -63,9 +63,8 @@ server.cleanup = glue.noop --request cleanup stub
 function server:log(tcp, severity, module, event, fmt, ...)
 	local logging = self.logging
 	if not logging or logging.filter[severity] then return end
-	local T = self.currentthread()
 	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.log(severity, module, event, '%-4s %-4s %s', T, tcp, s)
+	logging.log(severity, module, event, '%-4s %s', tcp, s)
 end
 
 function server:check(tcp, ret, ...)

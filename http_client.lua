@@ -521,9 +521,8 @@ end
 function client:log(target, severity, module, event, fmt, ...)
 	local logging = self.logging
 	if not logging or logging.filter[severity] then return end
-	local T = self.currentthread()
 	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.log(severity, module, event, '%-4s %-4s %s', T, target or '', s)
+	logging.log(severity, module, event, '%-4s %s', target or '', s)
 end
 
 function client:dp(target, ...)

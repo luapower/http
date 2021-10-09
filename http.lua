@@ -725,11 +725,10 @@ http:protect'send_response'
 function http:log(severity, module, event, fmt, ...)
 	local logging = self.logging
 	if not logging or logging.filter[severity] then return end
-	local T = self.currentthread()
 	local S = self.tcp or '-'
 	local dt = clock() - self.start_time
 	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.log(severity, module, event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
+	logging.log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
 end
 function http:dbg      (...) self:log(''     , ...) end
 function http:note     (...) self:log('note' , ...) end
@@ -743,9 +742,11 @@ function http:new(t)
 
 	local self = glue.object(self, {}, t)
 
-	if self.debug and self.debug.protocol then
+	if self.debug or self.logging then
+		self.logging = type(self.logging) == 'table' and self.logging or require'logging'
+	end
 
-		self.logging = require'logging'
+	if self.debug and self.debug.protocol then
 
 		function self:dp(...)
 			return self:log('', 'http', ...)
@@ -756,8 +757,6 @@ function http:new(t)
 	end
 
 	if self.debug and self.debug.stream then
-
-		self.logging = require'logging'
 
 		local function ds(event, s)
 			self:log('', 'http', event, '%5s %s', s and #s or '', s or '')
