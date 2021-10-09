@@ -60,28 +60,17 @@ end
 
 server.cleanup = glue.noop --request cleanup stub
 
-function server:dbg(tcp, event, fmt, ...)
-	local logging = require'logging'
-	if logging.filter[''] then return end
+function server:log(tcp, severity, module, event, fmt, ...)
+	local logging = self.logging
+	if not logging or logging.filter[severity] then return end
 	local T = self.currentthread()
 	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.dbg('http-s', event, '%-4s %-4s %s', T, tcp, s)
+	logging.log(severity, module, event, '%-4s %-4s %s', T, tcp, s)
 end
 
-function server:note(tcp, event, fmt, ...)
-	local logging = require'logging'
-	if logging.filter.note then return end
-	local T = self.currentthread()
-	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.note('http-s', event, '%-4s %-4s %s', T, tcp, s)
-end
-
-function server:logerror(tcp, event, fmt, ...)
-	local logging = require'logging'
-	if logging.filter.ERROR then return end
-	local T = self.currentthread()
-	local s = fmt and _(fmt, logging.args(...)) or ''
-	logging.logerror('http-s', event, '%-4s %-4s %s', T, tcp, s)
+function server:check(tcp, ret, ...)
+	if ret then return ret end
+	return self:log(tcp, 'ERROR', 'htsrv', ...)
 end
 
 function server:new(t)
@@ -92,9 +81,10 @@ function server:new(t)
 		self:bind_libs(self.libs)
 	end
 
-	if not self.debug then --don't load the logging module.
-		self.note = glue.noop
-		self.logerror = glue.noop
+	if self.debug then
+		self.logging = require'logging'
+	else
+		self.log = glue.noop
 	end
 
 	local function handler(ctcp, listen_opt)
@@ -112,9 +102,8 @@ function server:new(t)
 
 			local req, err = http:read_request()
 			if not req then
-				if not (errors.is(err, 'socket') and err.message == 'eof') then
-					self:logerror(ctcp, 'read_request', '%s', err)
-				end
+				local eof = errors.is(err, 'socket') and err.message == 'eof'
+				self:check(ctcp, eof, 'read_request', '%s', err)
 				break
 			end
 
@@ -127,9 +116,7 @@ function server:new(t)
 				sending_response = true
 				local res = http:build_response(req, opt, self:time())
 				local ok, err = http:send_response(res)
-				if not ok then
-					self:logerror(ctcp, 'send_response', '%s', err)
-				end
+				self:check(ctcp, ok, 'send_response', '%s', err)
 				finished = true
 			end
 
@@ -168,7 +155,7 @@ function server:new(t)
 					assert(not sending_response, 'response already sent')
 					req:respond(err)
 				elseif not sending_response then
-					self:logerror(ctcp, 'respond', '%s', err)
+					self:check(ctcp, false, 'respond', '%s', err)
 					req:respond{status = 500}
 				else
 					error(_('respond(): %s', err))
@@ -207,16 +194,15 @@ function server:new(t)
 
 		local ok, err = tcp:listen(addr, port)
 		if not ok then
-			self:logerror(tcp, 'listen', '("%s", %s): %s', addr, port, err)
+			self:check(tcp, false, 'listen', '("%s", %s): %s', addr, port, err)
 			goto continue
 		end
-		self:note(tcp, 'LISTEN', '%s:%d', addr, port)
+		self:log(tcp, 'note', 'htsrv', 'LISTEN', '%s:%d', addr, port)
 
 		if t.tls then
 			local opt = glue.update(self.tls_options, t.tls_options)
 			local stcp, err = self.stcp(tcp, opt)
-			if not stcp then
-				self:logerror(tcp, 'stcp', '%s', err)
+			if self:check(tcp, stcp, 'stcp', '%s', err) then
 				tcp:close()
 				goto continue
 			end
@@ -226,16 +212,12 @@ function server:new(t)
 
 		function accept_connection()
 			local ctcp, err, errcode = tcp:accept()
-			ctcp.n = n
-			if not ctcp then
-				self:logerror(tcp, 'accept',' %s', err)
+			if not self:check(tcp, ctcp, 'accept',' %s', err) then
 				return
 			end
 			self.resume(self.newthread(function()
 				local ok, err = xpcall(handler, debug.traceback, ctcp, t)
-				if not ok then
-					self:logerror(ctcp, 'handler', '%s', err)
-				end
+				self:check(ctcp, ok, 'handler', '\n%s', err)
 				ctcp:close()
 			end))
 		end

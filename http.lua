@@ -127,7 +127,7 @@ function http:send_request_line(method, uri, http_version)
 	assert(http_version == '1.1' or http_version == '1.0')
 	assert(method and method == method:upper())
 	assert(uri)
-	self:dbg('=>', '%s %s HTTP/%s', method, uri, http_version)
+	self:dp('=>', '%s %s HTTP/%s', method, uri, http_version)
 	self:send(_('%s %s HTTP/%s\r\n', method, uri, http_version))
 	return true
 end
@@ -135,7 +135,7 @@ end
 function http:read_request_line()
 	local method, uri, http_version =
 		self:read_line():match'^([%u]+)%s+([^%s]+)%s+HTTP/(%d+%.%d+)'
-	self:dbg('<-', '%s %s HTTP/%s', method, uri, http_version)
+	self:dp('<-', '%s %s HTTP/%s', method, uri, http_version)
 	self:check(method and (http_version == '1.0' or http_version == '1.1'), 'invalid request line')
 	return http_version, method, uri
 end
@@ -147,7 +147,7 @@ function http:send_status_line(status, message, http_version)
 	assert(status and status >= 100 and status <= 999, 'invalid status code')
 	assert(http_version == '1.1' or http_version == '1.0')
 	local s = _('HTTP/%s %d %s\r\n', http_version, status, message)
-	self:dbg('=>', '%s %s %s', status, message, http_version)
+	self:dp('=>', '%s %s %s', status, message, http_version)
 	self:send(s)
 end
 
@@ -155,7 +155,7 @@ function http:read_status_line()
 	local line = self:read_line()
 	local http_version, status, status_message
 		= line:match'^HTTP/(%d+%.%d+)%s+(%d%d%d)%s*(.*)'
-	self:dbg('<=', '%s %s %s', status, status_message, http_version)
+	self:dp('<=', '%s %s %s', status, status_message, http_version)
 	status = tonumber(status)
 	self:check(http_version and status, 'invalid status line')
 	return http_version, status, status_message
@@ -187,11 +187,11 @@ function http:send_headers(headers)
 			if v then
 				if type(v) == 'table' then --must be sent unfolded.
 					for i,v in ipairs(v) do
-						self:dbg('->', '%-17s %s', k, v)
+						self:dp('->', '%-17s %s', k, v)
 						self:send(_('%s: %s\r\n', k, v))
 					end
 				else
-					self:dbg('->', '%-17s %s', k, v)
+					self:dp('->', '%-17s %s', k, v)
 					self:send(_('%s: %s\r\n', k, v))
 				end
 			end
@@ -214,7 +214,7 @@ function http:read_headers(rawheaders)
 		end
 		value = value:gsub('%s+', ' ') --multiple spaces equal one space.
 		value = value:gsub('%s*$', '') --around-spaces are meaningless.
-		self:dbg('<-', '%-17s %s', name, value)
+		self:dp('<-', '%-17s %s', name, value)
 		if http_headers.nofold[name] then --prevent folding.
 			if rawheaders[name] then --duplicate header: add to list.
 				table.insert(rawheaders[name], value)
@@ -257,7 +257,7 @@ function http:read_chunks(write_content)
 		local len = tonumber(string.gsub(line, ';.*', ''), 16) --len[; extension]
 		self:check(len, 'invalid chunk size')
 		total = total + len
-		self:dbg('<<', '%7d bytes; chunk %d', len, chunk_num)
+		self:dp('<<', '%7d bytes; chunk %d', len, chunk_num)
 		if len == 0 then --last chunk (trailers not supported)
 			self:read_line()
 			break
@@ -265,7 +265,7 @@ function http:read_chunks(write_content)
 		self:read_exactly(len, write_content)
 		self:read_line()
 	end
-	self:dbg('<<', '%7d bytes in %d chunks', total, chunk_num)
+	self:dp('<<', '%7d bytes in %d chunks', total, chunk_num)
 end
 
 function http:send_chunked(read_content)
@@ -277,17 +277,17 @@ function http:send_chunked(read_content)
 		if chunk then
 			local len = len or #chunk
 			total = total + len
-			self:dbg('>>', '%7d bytes; chunk %d', len, chunk_num)
+			self:dp('>>', '%7d bytes; chunk %d', len, chunk_num)
 			self:send(_('%X\r\n', len))
 			self:send(chunk, len)
 			self:send'\r\n'
 		else
-			self:dbg('>>', '%7d bytes; chunk %d', 0, chunk_num)
+			self:dp('>>', '%7d bytes; chunk %d', 0, chunk_num)
 			self:send'0\r\n\r\n'
 			break
 		end
 	end
-	self:dbg('>>', '%7d bytes in %d chunks', total, chunk_num)
+	self:dp('>>', '%7d bytes in %d chunks', total, chunk_num)
 end
 
 function http:zlib_decoder(format, write)
@@ -344,19 +344,19 @@ function http:send_body(content, content_size, transfer_encoding, close)
 				if not chunk then break end
 				local len = len or #chunk
 				total = total + len
-				self:dbg('>>', '%7d bytes total', len)
+				self:dp('>>', '%7d bytes total', len)
 				self:send(chunk, len)
 			end
-			self:dbg('>>', '%7d bytes total', total)
+			self:dp('>>', '%7d bytes total', total)
 		else
 			local len = content_size or #content
 			if len > 0 then
-				self:dbg('>>', '%7d bytes', len)
+				self:dp('>>', '%7d bytes', len)
 				self:send(content, len)
 			end
 		end
 	end
-	self:dbg('  ', '')
+	self:dp('  ', '')
 	if close then
 		--this is the "http graceful close" you hear about: we send a FIN to
 		--the client then we wait for it to close the connection in response
@@ -379,10 +379,10 @@ function http:read_body_to_writer(headers, write, from_server, close, state)
 		self:read_chunks(write)
 	elseif headers['content-length'] then
 		local len = headers['content-length']
-		self:dbg('<<', '%7d bytes total', len)
+		self:dp('<<', '%7d bytes total', len)
 		self:read_exactly(len, write)
 	elseif from_server and close then
-		self:dbg('<<', '?? bytes (reading until closed)')
+		self:dp('<<', '?? bytes (reading until closed)')
 		self:read_until_closed(write)
 	end
 	if close and from_server then
@@ -722,58 +722,68 @@ http:protect'send_response'
 
 --instantiation --------------------------------------------------------------
 
-local function logfunc(funcname)
-	return function(self, event, fmt, ...)
-		local logging = require'logging'
-		if logging.filter[''] then return end
-		local T = self.currentthread()
-		local S = self.tcp or '-'
-		local dt = clock() - self.start_time
-		local s = fmt and _(fmt, logging.args(...)) or ''
-		logging[funcname]('http', event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
-	end
+function http:log(severity, module, event, fmt, ...)
+	local logging = self.logging
+	if not logging or logging.filter[severity] then return end
+	local T = self.currentthread()
+	local S = self.tcp or '-'
+	local dt = clock() - self.start_time
+	local s = fmt and _(fmt, logging.args(...)) or ''
+	logging.log(severity, module, event, '%-4s %-4s %6.2fs %s', T, S, dt, s)
 end
-http.dbg  = logfunc'dbg'
-http.note = logfunc'note'
+function http:nolog    (...) self:log(''     , ...) end
+function http:dbg      (...) self:log(''     , ...) end
+function http:note     (...) self:log('note' , ...) end
+function http:logerror (...) self:log('ERROR', ...) end
+function http:warnif   (module, event, cond, ...)
+	if not cond then return end
+	self:log('WARN', module, event, ...)
+end
 
 function http:new(t)
 
 	local self = glue.object(self, {}, t)
 
-	if self.debug then
+	if self.debug and self.debug.protocol then
 
-		if self.debug.stream then
+		self.logging = require'logging'
 
-			local P = function(event, s)
-				self:dbg(event, '%5s %s', s and #s or '', s or '')
-			end
-
-			glue.override(self.tcp, 'recv', function(inherited, self, buf, ...)
-				local sz, err, errcode = inherited(self, buf, ...)
-				if not sz then return nil, err, errcode end
-				P('<', ffi.string(buf, sz))
-				return sz
-			end)
-
-			glue.override(self.tcp, 'send', function(inherited, self, buf, ...)
-				local sz, err, errcode = inherited(self, buf, ...)
-				if not sz then return nil, err, errcode end
-				P('>', ffi.string(buf, sz))
-				return sz
-			end)
-
-			glue.override(self.tcp, 'close', function(inherited, self, ...)
-				local ok, err, errcode = inherited(self, ...)
-				if not ok then return nil, err, errcode  end
-				P('CC')
-				return ok
-			end)
-
+		function self:dp(...)
+			return self:log('', 'http', ...)
 		end
 
-	else --don't load the logging module.
+	else
+		self.dp = glue.noop
+	end
 
-		self.dbg = glue.noop
+	if self.debug and self.debug.stream then
+
+		self.logging = require'logging'
+
+		local function ds(event, s)
+			self:log('', 'http', event, '%5s %s', s and #s or '', s or '')
+		end
+
+		glue.override(self.tcp, 'recv', function(inherited, self, buf, ...)
+			local sz, err, errcode = inherited(self, buf, ...)
+			if not sz then return nil, err, errcode end
+			ds('<', ffi.string(buf, sz))
+			return sz
+		end)
+
+		glue.override(self.tcp, 'send', function(inherited, self, buf, ...)
+			local sz, err, errcode = inherited(self, buf, ...)
+			if not sz then return nil, err, errcode end
+			ds('>', ffi.string(buf, sz))
+			return sz
+		end)
+
+		glue.override(self.tcp, 'close', function(inherited, self, ...)
+			local ok, err, errcode = inherited(self, ...)
+			if not ok then return nil, err, errcode  end
+			ds('CC')
+			return ok
+		end)
 
 	end
 
