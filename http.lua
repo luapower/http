@@ -616,11 +616,15 @@ http.nocompress_mime_types = glue.index{
 	'application/pdf',
 	'application/zip',
 	'application/x-gzip',
-	'application/x-gzip',
 	'application/x-xz',
 	'application/x-bz2',
 	'audio/mpeg',
+	'text/event-stream',
 }
+
+function http:accept_content_type(req, opt)
+	return true, opt.content_type
+end
 
 function http:accept_content_encoding(req, opt)
 	local accept = req.headers['accept-encoding']
@@ -653,10 +657,6 @@ function http:allow_method(req, opt)
 	return not allowed_methods or allowed_methods[req.method], allowed_methods
 end
 
-function http:accept_content_type(req, opt)
-	return true, opt.content_type
-end
-
 local sres = {}
 
 function http:build_response(req, opt, time)
@@ -685,20 +685,20 @@ function http:build_response(req, opt, time)
 		return res
 	end
 
-	local accept, content_encoding = self:accept_content_encoding(req, opt)
-	if not accept then
-		no_body(res, 406) --not acceptable
-		return res
-	else
-		res.headers['content-encoding'] = content_encoding
-	end
-
 	local accept, content_type = self:accept_content_type(req, opt)
 	if not accept then
 		no_body(res, 406) --not acceptable
 		return res
 	else
 		res.headers['content-type'] = content_type
+	end
+
+	local accept, content_encoding = self:accept_content_encoding(req, opt)
+	if not accept then
+		no_body(res, 406) --not acceptable
+		return res
+	else
+		res.headers['content-encoding'] = content_encoding
 	end
 
 	res.content, res.content_size =

@@ -187,6 +187,7 @@ function server:new(t)
 		end
 
 		local tcp = assert(self.tcp())
+		assert(tcp:setopt('reuseaddr', true))
 		local addr, port = t.addr or '*', t.port or (t.tls and 443 or 80)
 
 		local ok, err = tcp:listen(addr, port)
