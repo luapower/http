@@ -324,9 +324,9 @@ function http:zlib_encoder(format, content, content_size)
 		local s = ffi.string(content, content_size)
 		return self.zlib.deflate(s, '', nil, format)
 	elseif type(content) == 'function' then
-		return self.cosafewrap(function(yield)
+		return (self.cosafewrap(function(yield)
 			self.zlib.deflate(content, yield, nil, format)
-		end)
+		end))
 	else
 		assert(false, type(content))
 	end
