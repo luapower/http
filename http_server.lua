@@ -123,7 +123,7 @@ function server:new(t)
 						opt.content = yield
 						send_response(opt)
 					end)
-					write_body() --eof
+					write_body()
 					return write_body
 				else
 					send_response(opt)
