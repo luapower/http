@@ -404,10 +404,10 @@ function http:read_body(headers, write, from_server, close, state)
 		end
 	elseif write == 'reader' then
 		--don't read the body, but return a reader function for it instead.
-		return self.cosafewrap(function(yield)
+		return (self.cosafewrap(function(yield)
 			self:read_body_to_writer(headers, yield, from_server, close, state)
 			return nil, 'eof'
-		end)
+		end))
 	else
 		self:read_body_to_writer(headers, write, from_server, close, state)
 		return true
