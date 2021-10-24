@@ -730,13 +730,6 @@ function http:log(severity, module, event, fmt, ...)
 	local s = fmt and _(fmt, logging.args(...)) or ''
 	logging.log(severity, module, event, '%-4s %6.2fs %s', S, dt, s)
 end
-function http:dbg      (...) self:log(''     , ...) end
-function http:note     (...) self:log('note' , ...) end
-function http:logerror (...) self:log('ERROR', ...) end
-function http:warnif   (module, event, cond, ...)
-	if not cond then return end
-	self:log('WARN', module, event, ...)
-end
 
 function http:new(t)
 
