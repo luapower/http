@@ -145,7 +145,7 @@ function server:new(t)
 			req.thread = self.currentthread()
 
 			local ok, err = errors.catch(nil, self.respond, req)
-			self.cleanup()
+			self:cleanup(req)
 
 			if not ok then
 				if errors.is(err, 'http_response') then
