@@ -58,7 +58,7 @@ function server:time(ts)
 	return glue.time(ts)
 end
 
-server.cleanup = glue.noop --request cleanup stub
+server.request_finish = glue.noop --request finalizer stub
 
 function server:log(tcp, severity, module, event, fmt, ...)
 	local logging = self.logging
@@ -145,7 +145,7 @@ function server:new(t)
 			req.thread = self.currentthread()
 
 			local ok, err = errors.catch(nil, self.respond, req)
-			self:cleanup(req)
+			self:request_finish(req)
 
 			if not ok then
 				if errors.is(err, 'http_response') then
@@ -155,7 +155,7 @@ function server:new(t)
 					self:check(ctcp, false, 'respond', '%s', err)
 					req:respond{status = 500}
 				else
-					error(_('respond(): %s', err))
+					error(_('respond() error:\n%s', err))
 				end
 			elseif not finished then --eof not signaled.
 				if write_body then
@@ -213,18 +213,20 @@ function server:new(t)
 			if not self:check(tcp, ctcp, 'accept',' %s', err) then
 				return
 			end
-			self.resume(self.newthread(function()
+			self.thread(function()
+				self:log(ctcp, 'note', 'htsrv', 'accept')
 				local ok, err = xpcall(handler, debug.traceback, ctcp, t)
-				self:check(ctcp, ok, 'handler', '\n%s', err)
+				self:log(ctcp, 'note', 'htsrv', 'closed')
+				self:check(ctcp, ok, 'handler', '%s', err)
 				ctcp:close()
-			end))
+			end)
 		end
 
-		self.resume(self.newthread(function()
+		self.thread(function()
 			while not stop do
 				accept_connection()
 			end
-		end))
+		end)
 
 		::continue::
 	end
