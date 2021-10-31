@@ -27,6 +27,6 @@ EOF
 }
 
 cmd="$1"; shift
-[ "$cmd" ] || usage "ca | server <hostname>"
+[ "$cmd" ] || usage "ca | server HOST"
 "do_$cmd" "$@"
 
