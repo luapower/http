@@ -215,7 +215,7 @@ function server:new(t)
 			end
 			self.thread(function()
 				self:log(ctcp, 'note', 'htsrv', 'accept')
-				local ok, err = xpcall(handler, debug.traceback, ctcp, t)
+				local ok, err = glue.pcall(handler, ctcp, t)
 				self:log(ctcp, 'note', 'htsrv', 'closed')
 				self:check(ctcp, ok, 'handler', '%s', err)
 				ctcp:close()
