@@ -209,7 +209,7 @@ function server:new(t)
 		push(self.sockets, tcp)
 
 		function accept_connection()
-			local ctcp, err, errcode = tcp:accept()
+			local ctcp, err = tcp:accept()
 			if not self:check(tcp, ctcp, 'accept',' %s', err) then
 				return
 			end
