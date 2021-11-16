@@ -20,7 +20,7 @@ end
 
 function name(s) --Some-Name -> some_name
 	if s == '' then return end
-	return (s:gsub('%-','_'):lower())
+	return (s:gsub('%-', '_'):lower())
 end
 
 local function int(s) --"123" -> 123
