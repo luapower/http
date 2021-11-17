@@ -43,7 +43,7 @@ function client:bind_libs(libs)
 		if lib == 'sock' then
 			local sock = require'sock'
 			self.tcp           = sock.tcp
-			self.cosafewrap    = sock.cosafewrap
+			self.cowrap        = sock.cowrap
 			self.newthread     = sock.newthread
 			self.suspend       = sock.suspend
 			self.resume        = sock.resume
@@ -102,7 +102,7 @@ function client:target(t) --t is request options
 			https = https,
 			max_line_size = t.max_line_size,
 			debug = t.debug,
-			cosafewrap = self.cosafewrap,
+			cowrap = self.cowrap,
 			currentthread = self.currentthread,
 		}
 		target.max_pipelined_requests = t.max_pipelined_requests

@@ -36,7 +36,7 @@ function server:bind_libs(libs)
 		if lib == 'sock' then
 			local sock = require'sock'
 			self.tcp           = sock.tcp
-			self.cosafewrap    = sock.cosafewrap
+			self.cowrap        = sock.cowrap
 			self.newthread     = sock.newthread
 			self.resume        = sock.resume
 			self.thread        = sock.thread
@@ -90,7 +90,7 @@ function server:new(t)
 			debug = self.debug,
 			max_line_size = self.max_line_size,
 			tcp = ctcp,
-			cosafewrap = self.cosafewrap,
+			cowrap = self.cowrap,
 			currentthread = self.currentthread,
 			listen_options = listen_opt,
 		})
@@ -119,7 +119,7 @@ function server:new(t)
 
 			function req.respond(req, opt, want_write_body)
 				if want_write_body then
-					write_body = self.cosafewrap(function(yield)
+					write_body = self.cowrap(function(yield)
 						opt.content = yield
 						send_response(opt)
 					end)

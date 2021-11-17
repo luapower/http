@@ -292,7 +292,7 @@ end
 
 function http:zlib_decoder(format, write)
 	assert(self.zlib, 'zlib not loaded')
-	local decode = self.cosafewrap(function(yield)
+	local decode = self.cowrap(function(yield)
 		self.zlib.inflate(yield, write, nil, format)
 	end)
 	decode()
@@ -324,7 +324,7 @@ function http:zlib_encoder(format, content, content_size)
 		local s = ffi.string(content, content_size)
 		return self.zlib.deflate(s, '', nil, format)
 	elseif type(content) == 'function' then
-		return (self.cosafewrap(function(yield)
+		return (self.cowrap(function(yield)
 			self.zlib.deflate(content, yield, nil, format)
 		end))
 	else
@@ -404,7 +404,7 @@ function http:read_body(headers, write, from_server, close, state)
 		end
 	elseif write == 'reader' then
 		--don't read the body, but return a reader function for it instead.
-		return (self.cosafewrap(function(yield)
+		return (self.cowrap(function(yield)
 			self:read_body_to_writer(headers, yield, from_server, close, state)
 			return nil, 'eof'
 		end))
