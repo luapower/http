@@ -3,12 +3,15 @@
 --Written by Cosmin Apreutesei. Public Domain.
 
 local glue = require'glue'
-local b64 = require'libb64'
+local b64 = require'base64'
 local http_date = require'http_date'
 local re = require'lpeg.re' --for tokens()
-local base64 = b64.decode_string
+
+local b64, b64_arg = b64.encode, b64.decode
 local _ = string.format
 local concat = table.concat
+local trim = glue.trim
+local pass = glue.pass
 
 local headers = {}
 
@@ -50,7 +53,7 @@ local function namesplit(s)
 	local name = s:gmatch'[^,]+'
 	return function()
 		local s = name()
-		return s and glue.trim(s)
+		return s and trim(s)
 	end
 end
 
@@ -220,7 +223,7 @@ local function credentials(s) --basic base64-string | digest k=v,... per http://
 	if not scheme then return end
 	scheme = name(scheme)
 	if scheme == 'basic' then --basic base64("user:password")
-		local user,pass = base64(s):match'^([^:]*):(.*)$'
+		local user,pass = b64_arg(s):match'^([^:]*):(.*)$'
 		return {scheme = scheme, user = user, pass = pass}
 	elseif scheme == 'digest' then
 		local dt = propertylist(s, credentials_parsers)
@@ -237,7 +240,7 @@ parse.proxy_authorization = credentials
 local function must_urllist(s)
 	if s == true then return end
 	local dt = {}
-	for s in glue.gsplit(s, ' ') do
+	for s in s:gmatch'[^%s]+' do
 		dt[#dt+1] = s
 	end
 	return #dt > 0 and dt or nil
@@ -303,7 +306,7 @@ parse.content_length = int
 parse.content_location = url
 
 function parse.content_md5(s)
-	return glue.tohex(base64(s))
+	return b64_arg(s)
 end
 
 function parse.content_range(s) --bytes <from>-<to>/<total> -> {from=,to=,total=,size=}
@@ -561,7 +564,7 @@ function parse.set_cookie(t)
 				cookie.value = v
 			else --attr=val | attr= | attr | ext
 				local k, eq, v = s:match'^([^=]+)(=?)%s*(.-)%s*$'
-				k = glue.trim(k):lower()
+				k = trim(k):lower()
 				if eq == '' then v = true end
 				local parse = headers.cookie_attr_parsers[k]
 				if parse then
@@ -657,7 +660,7 @@ end
 local ci = string.lower
 
 local function int(v)
-	glue.assert(math.floor(v) == v, 'integer expected')
+	assert(math.floor(v) == v, 'integer expected')
 	return v
 end
 
@@ -667,7 +670,7 @@ end
 
 --{k->true} -> k1,k2,...
 local function klist(t, format)
-	format = format or glue.pass
+	format = format or pass
 	if type(t) == 'table' then
 		local dt = {}
 		for k,v in pairs(t) do
@@ -690,7 +693,7 @@ end
 
 --{v1,v2,...} -> v1,v2,...
 local function list(t, format)
-	format = format or glue.pass
+	format = format or pass
 	if type(t) == 'table' then
 		local dt = {}
 		for i,v in ipairs(t) do
@@ -796,7 +799,7 @@ headers.nofold = { --headers that it isn't safe to fold.
 format.cache_control = kvlist --no_cache
 format.connection = cilist
 format.content_length = int
-format.content_md5 = base64
+format.content_md5 = b64
 format.content_type = params{charset = ci} --text/html; charset=iso-8859-1
 format.date = date
 format.pragma = nil --cilist?
