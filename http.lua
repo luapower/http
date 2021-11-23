@@ -29,16 +29,18 @@ local sock_error = errors.errortype'socket'
 
 function http:check(v, ...)
 	if v then return v, ... end
-	local err, errcode = ...
-	errors.raise(http_error{http = self, message = err, errorcode = errcode,
-		addtraceback = self.debug and self.debug.tracebacks})
+	local e = http_error(...)
+	e.http = self.http
+	e.addtraceback = self.debug and self.debug.tracebacks
+	errors.raise(e)
 end
 
 function http:check_io(v, ...)
 	if v then return v, ... end
-	local err, errcode = ...
-	errors.raise(sock_error{http = self, message = err, errorcode = errcode,
-		addtraceback = self.debug and self.debug.tracebacks})
+	local e = sock_error(...)
+	e.http = self.http
+	e.addtraceback = self.debug and self.debug.tracebacks
+	errors.raise(e)
 end
 
 glue.before(http_error, 'init', function(self) self.http.tcp:close(0) end)
