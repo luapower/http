@@ -2,21 +2,16 @@
 ## `local http = require'http'`
 
 HTTP 1.1 client & server protocol in Lua.
-
-Works over an user-provided I/O API with three methods:
-
- * `http.tcp:recv(buf, maxlen, [expires]) -> recv_len | nil,err`
- * `http.tcp:send(s|buf, [len], [expires]) -> sent_len | nil,err`
- * `http.tcp:close([expires])`
+Uses [sock] for I/O but you can bring your own.
 
 GZip compression can be enabled with `http.zlib = require'zlib'`.
 
-This module only implements the HTTP protocol. For a working HTTP client
+This module only implements the actual protocol. For a working HTTP client
 and server based on this module, see [http_client] and [http_server].
 
 ## Status
 
-<warn>Alpha<warn>
+Works in developement, not used 24/7 yet.
 
 ## API
 
