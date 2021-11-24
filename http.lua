@@ -16,38 +16,14 @@ local http = {type = 'http_connection', debug_prefix = 'H'}
 
 --error handling -------------------------------------------------------------
 
---errors raised with with :check() instead of assert() or error() enable
---methods wrapped with http:protect() to return nil,err for those errors
---and also to close the connection automatically on the first error.
+local check_io, checkp, check, protect = errors.tcp_protocol_errors'http'
 
---we distinguish between invalid usage (bugs on this side, which raise),
---protocol errors (bugs on the other side which don't raise) and I/O errors
---(network failures which can be temporary, making the call retriable).
-
-local http_error = errors.errortype'http'
-local sock_error = errors.errortype'socket'
-
-function http:check(v, ...)
-	if v then return v, ... end
-	local e = http_error(...)
-	e.http = self.http
-	e.addtraceback = self.debug and self.debug.tracebacks
-	errors.raise(e)
-end
-
-function http:check_io(v, ...)
-	if v then return v, ... end
-	local e = sock_error(...)
-	e.http = self.http
-	e.addtraceback = self.debug and self.debug.tracebacks
-	errors.raise(e)
-end
-
-glue.before(http_error, 'init', function(self) self.http.tcp:close(0) end)
-glue.before(sock_error, 'init', function(self) self.http.tcp:close(0) end)
+http.check_io = check_io
+http.checkp = checkp
+http.check = check
 
 function http:protect(method)
-	self[method] = errors.protect('http socket', self[method])
+	self[method] = protect(self[method])
 end
 
 --low-level I/O API ----------------------------------------------------------
@@ -736,6 +712,10 @@ end
 function http:new(t)
 
 	local self = glue.object(self, {}, t)
+
+	if self.debug and self.debug.tracebacks then
+		self.tracebacks = true --for tcp_protocol_errors.
+	end
 
 	if self.debug and (self.logging == nil or self.logging == true) then
 		self.logging = require'logging'
