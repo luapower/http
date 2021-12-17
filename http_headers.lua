@@ -5,7 +5,7 @@
 local glue = require'glue'
 local b64 = require'base64'
 local http_date = require'http_date'
-local re = require'lpeg.re' --for tokens()
+local re = require'relabel' --for tokens()
 
 local b64, b64_arg = b64.encode, b64.decode
 local _ = string.format
