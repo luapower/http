@@ -415,7 +415,7 @@ function client:get_cookies(client_ip, host, uri, https, time)
 end
 
 function client:save_cookies(file)
-	return glue.writefile(file, pp.format(self.cookies, '\t'))
+	return pp.save(file, self.cookies)
 end
 
 function client:load_cookies(file)
