@@ -1,7 +1,7 @@
 
 local ffi = require'ffi'
---ffi.tls_libname = 'tls_bearssl'
-ffi.tls_libname = 'tls_libressl'
+ffi.tls_libname = 'tls_bearssl'
+--ffi.tls_libname = 'tls_libressl'
 
 local client  = require'http_client'
 local time    = require'time'
@@ -29,11 +29,12 @@ local client = client:new{
 local n = 0
 for i=1,1 do
 	client.thread(function()
-		print('sleep .5')
-		client.sleep(.5)
+		--print('sleep .5')
+		--client.sleep(.5)
 		local res, req, err_class = client:request{
 			--host = 'www.websiteoptimization.com', uri = '/speed/tweak/compress/',
-			host = 'luapower.com', uri = '/',
+			host = 'www.libpng.org', uri = '/pub/png/spec/1.2/PNG-Chunks.html',
+			--host = 'luapower.com', uri = '/',
 			--https = true,
 			--host = 'mokingburd.de',
 			--host = 'www.google.com', https = true,
@@ -45,6 +46,7 @@ for i=1,1 do
 			--request_timeout = 0.5,
 			--reply_timeout = 0.3,
 		}
+		pr(res, req, err_class)
 		if res then
 			n = n + (res and res.content and #res.content or 0)
 		else
